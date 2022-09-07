@@ -6,7 +6,14 @@ import pandas as pd
 
 from src.utils import get_timestamp
 
-COLUMN_SUBSET = [
+META_COLS = [
+    "subject_id",
+    "stay_id",
+    "hr"
+    ]
+TARGET_COL = ["glucose"]
+
+CONTINUOUS_COVARIATES = [
     "sofa_24hours",
     "liver_24hours",
     "weight_kg",
@@ -34,10 +41,35 @@ COLUMN_SUBSET = [
     "pre_IV_sa_insulin",
     "pos_PN_sa_insulin",
     "pos_IV_sa_insulin",
-    "hr",
-    "subject_id",
-    "stay_id",
+    "admission_age"  # is this a categorical confounder ?
 ]
+
+CATEGORICAL_CONFOUNDERS = [
+    # "myocardial_infarct",
+    "congestive_heart_failure",
+    # "peripheral_vascular_disease",
+    # "cerebrovascular_disease",
+    # "dementia",
+    # "chronic_pulmonary_disease",
+    # "rheumatic_disease",
+    # "peptic_ulcer_disease",
+    # "mild_liver_disease",
+    # "diabetes_without_cc",
+    # "diabetes_with_cc",
+    # "paraplegia",
+    "renal_disease",
+    "malignant_cancer",
+    # "severe_liver_disease",
+    # "metastatic_solid_tumor",
+    "aids",
+    "diabetes",
+    "diabetes_type",
+    "septic",
+    "gender",
+    "ethnicity",
+]
+
+COLUMN_SUBSET = META_COLS + TARGET_COL + CONTINUOUS_COVARIATES + CATEGORICAL_CONFOUNDERS
 
 TUBE_FEEDING_COLS = ["pre_dexPN", "dexPN", "pos_dexPN"]
 DEXTROSE_COLS = ["dex5", "dex>5", "pos_dex5", "pos_dex>5", "pre_dex>5", "pre_dex5"]
@@ -69,6 +101,7 @@ def create_base_dataset(df_cohort: pd.DataFrame) -> pd.DataFrame:
     df = df_cohort[df_cohort.subject_id.isin(selected_patient_ids)]
 
     # select stays with duration within interquantile range [6, 27]
+    # we get these values from box plot of stay counts
     stay_counts_df = df.groupby(["stay_id"])["glucose"].count()
     filtered_stay_count_df = stay_counts_df[(6 <= stay_counts_df) & (stay_counts_df <= 27)]
     stay_id_set = set(filtered_stay_count_df.index)
