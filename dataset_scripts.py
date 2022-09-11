@@ -4,83 +4,18 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.constants import (
+    CONTINUOUS_COVARIATES,
+    CATEGORICAL_CONFOUNDERS,
+    META_COLS,
+    DEXTROSE_COLS,
+    INSULIN_COLS,
+    TUBE_FEEDING_COLS,
+    TARGET_COL,
+)
 from src.utils import get_timestamp
 
-META_COLS = [
-    "subject_id",
-    "stay_id",
-    "hr"
-    ]
-TARGET_COL = ["glucose"]
-
-CONTINUOUS_COVARIATES = [
-    "sofa_24hours",
-    "liver_24hours",
-    "weight_kg",
-    "height_cm",
-    "bmi",
-    "cns_24hours",
-    "admission_age",
-    "cardiovascular_24hours",
-    "pre_dexPN",
-    "dexPN",
-    "pos_dexPN",
-    "charlson_comorbidity_index",
-    "dex5",
-    "dex>5",
-    "pos_dex5",
-    "pos_dex>5",
-    "pre_dex>5",
-    "pre_dex5",
-    "coagulation_24hours",
-    "respiration_24hours",
-    "renal_24hours",
-    "PN_sa_insulin",
-    "IV_sa_insulin",
-    "pre_PN_sa_insulin",
-    "pre_IV_sa_insulin",
-    "pos_PN_sa_insulin",
-    "pos_IV_sa_insulin",
-    "admission_age"  # is this a categorical confounder ?
-]
-
-CATEGORICAL_CONFOUNDERS = [
-    # "myocardial_infarct",
-    "congestive_heart_failure",
-    # "peripheral_vascular_disease",
-    # "cerebrovascular_disease",
-    # "dementia",
-    # "chronic_pulmonary_disease",
-    # "rheumatic_disease",
-    # "peptic_ulcer_disease",
-    # "mild_liver_disease",
-    # "diabetes_without_cc",
-    # "diabetes_with_cc",
-    # "paraplegia",
-    "renal_disease",
-    "malignant_cancer",
-    # "severe_liver_disease",
-    # "metastatic_solid_tumor",
-    "aids",
-    "diabetes",
-    "diabetes_type",
-    "septic",
-    "gender",
-    "ethnicity",
-]
-
 COLUMN_SUBSET = META_COLS + TARGET_COL + CONTINUOUS_COVARIATES + CATEGORICAL_CONFOUNDERS
-
-TUBE_FEEDING_COLS = ["pre_dexPN", "dexPN", "pos_dexPN"]
-DEXTROSE_COLS = ["dex5", "dex>5", "pos_dex5", "pos_dex>5", "pre_dex>5", "pre_dex5"]
-INSULIN_COLS = [
-    "PN_sa_insulin",
-    "IV_sa_insulin",
-    "pre_PN_sa_insulin",
-    "pre_IV_sa_insulin",
-    "pos_PN_sa_insulin",
-    "pos_IV_sa_insulin",
-]
 
 
 def create_base_dataset(df_cohort: pd.DataFrame) -> pd.DataFrame:
