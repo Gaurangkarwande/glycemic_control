@@ -1,6 +1,7 @@
-import torch
 import math
-from torch import nn, Tensor
+
+import torch
+from torch import Tensor, nn
 
 
 class PositionalEncoder(nn.Module):
@@ -58,7 +59,7 @@ class PositionalEncoder(nn.Module):
 
             pe[:, 0, 1::2] = torch.cos(position * div_term)
 
-        self.register_buffer("pe", pe)
+        self.register_buffer("pe", pe)  # not a model parameter. Wont store gradients.
 
     def forward(self, x: Tensor) -> Tensor:
         """

@@ -1,4 +1,5 @@
-from torch import nn, Tensor
+from torch import Tensor, nn
+
 from models.positional_encoder import PositionalEncoder
 
 
@@ -25,7 +26,7 @@ class TimeSeriesTransformer(nn.Module):
         self,
         input_size: int,
         dec_seq_len: int,
-        batch_first: bool,
+        batch_first: bool = True,
         out_seq_len: int = 58,
         dim_val: int = 512,
         n_encoder_layers: int = 4,
@@ -42,6 +43,7 @@ class TimeSeriesTransformer(nn.Module):
         """
         Args:
             input_size: int, number of input variables. 1 if univariate.
+            max_seq_len: int, the maximum length of input sequence
             dec_seq_len: int, the length of the input sequence fed to the decoder
             dim_val: int, aka d_model. All sub-layers in the model produce
                      outputs of dimension dim_val
@@ -79,9 +81,7 @@ class TimeSeriesTransformer(nn.Module):
         self.linear_mapping = nn.Linear(in_features=dim_val, out_features=num_predicted_features)
 
         # Create positional encoder
-        self.positional_encoding_layer = PositionalEncoder(
-            d_model=dim_val, dropout=dropout_pos_enc
-        )
+        self.positional_encoding_layer = PositionalEncoder(d_model=dim_val, dropout=dropout_pos_enc)
 
         # The encoder layer used in the paper is identical to the one used by
         # Vaswani et al (2017) on which the PyTorch module is based.
