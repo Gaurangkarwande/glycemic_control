@@ -138,7 +138,7 @@ def train_transformer(
     # Hyperparams
     batch_size = 4
     lr = 1e-3
-    num_epochs = 40
+    num_epochs = 60
 
     # Params
     enc_seq_len = 3  # length of input given to encoder
@@ -252,7 +252,7 @@ def train_transformer(
 
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    early_stopping = EarlyStopping()
+    early_stopping = EarlyStopping(patience=20)
     lr_scheduler = LRScheduler(optimizer)
 
     # transfer to GPU
