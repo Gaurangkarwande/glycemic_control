@@ -1,17 +1,19 @@
 import argparse
 from collections import defaultdict
 from pathlib import Path
+from typing import Tuple
 
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 from src.constants import (
-    CONTINUOUS_COVARIATES,
     CATEGORICAL_CONFOUNDERS,
-    META_COLS,
+    CONTINUOUS_COVARIATES,
     DEXTROSE_COLS,
     INSULIN_COLS,
-    TUBE_FEEDING_COLS,
+    META_COLS,
     TARGET_COL,
+    TUBE_FEEDING_COLS,
 )
 from src.utils import get_timestamp
 
@@ -19,7 +21,12 @@ COLUMN_SUBSET = META_COLS + TARGET_COL + CONTINUOUS_COVARIATES + CATEGORICAL_CON
 
 
 def create_base_dataset(df_cohort: pd.DataFrame) -> pd.DataFrame:
-    """Create the base dataset from raw cohort"""
+    """Create the base dataset from raw cohort
+    Args:
+        df_cohort: the pandas dataframe
+
+    Returns: processed dataframe that will be used as base dataset
+    """
 
     # patient map : {patient_id : [list of stay ids]}
     stay_patient_map = defaultdict(list)
@@ -52,6 +59,32 @@ def create_base_dataset(df_cohort: pd.DataFrame) -> pd.DataFrame:
     covariate_df["insulin"] = raw_covariate_df[INSULIN_COLS].mean(axis=1)
     covariate_df.drop(labels=TUBE_FEEDING_COLS + DEXTROSE_COLS + INSULIN_COLS, inplace=True, axis=1)
     return covariate_df
+
+
+def train_valid_test_splits_v1(
+    df: pd.DataFrame, seed: int = 123
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split the dataset into train valid and test splits. This does patient-wise splitting.
+    We split the patients into train, valid and test patients. Underlying assumption each patient
+    is a sample is IID.
+    Train : valid : test = 70 : 10 : 20
+
+    Args:
+        df : the dataframe of all patients
+        seed : the random state. Default = 123
+
+    Returns: (train data, valid data, test data)
+    """
+
+    patient_ids = df.subject_id.unique()
+    train_patients, test_patients = train_test_split(patient_ids, test_size=0.2, random_state=seed)
+    train_patients, valid_patients = train_test_split(
+        train_patients, test_size=0.1, random_state=seed
+    )
+    df_train = df[df.subject_id.isin(set(train_patients))]
+    df_valid = df[df.subject_id.isin(set(valid_patients))]
+    df_test = df[df.subject_id.isin(set(test_patients))]
+    return df_train, df_valid, df_test
 
 
 def parse_args():
