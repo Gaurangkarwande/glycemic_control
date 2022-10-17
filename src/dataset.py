@@ -125,7 +125,7 @@ class TransformerDataset(Dataset):
         # decoder input. As per the paper, it must have the same dimension as the
         # target sequence, and it must contain the last value of src, and all
         # values of trg_y except the last (i.e. it must be shifted right by 1)
-        trg = label_sequence[enc_seq_len - 1 : len(label_sequence) - 1]
+        trg = data_sequence[enc_seq_len - 1 : len(label_sequence) - 1]
 
         assert len(trg) == target_seq_len, "Length of trg does not match target sequence length"
 

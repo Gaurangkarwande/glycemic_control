@@ -138,10 +138,10 @@ def train_transformer(
     # Hyperparams
     batch_size = 4
     lr = 1e-3
-    num_epochs = 60
+    num_epochs = 20
 
     # Params
-    enc_seq_len = 3  # length of input given to encoder
+    enc_seq_len = 4  # length of input given to encoder
     output_sequence_length = 1  # how many future glucose values to predict
     step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
     batch_first = True
@@ -151,6 +151,9 @@ def train_transformer(
         CONTINUOUS_COVARIATES_PROCESSED + STATIC_COLS
     )  # Each element must correspond to a column name
     input_variables = TARGET_COL + exogenous_vars
+
+    input_size = len(input_variables)
+    num_predicted_features = 1
 
     logger.info(
         f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
@@ -234,10 +237,9 @@ def train_transformer(
     # create model
 
     model = TimeSeriesTransformer(
-        input_size=len(input_variables),
-        dec_seq_len=enc_seq_len,
+        input_size=input_size,
         batch_first=batch_first,
-        num_predicted_features=1,
+        num_predicted_features=num_predicted_features,
     )
 
     # create masks
@@ -313,7 +315,7 @@ def train_transformer(
                 "optimizer": optimizer.state_dict(),
                 "best_rmse": best_valid_rmse,
             }
-            fpath_checkpoint = dirpath_checkpoint.joinpath(f"checkpoint_epoch_{epoch}.pth")
+            fpath_checkpoint = dirpath_checkpoint.joinpath("best_checkpoint.pth")
             torch.save(checkpoint, fpath_checkpoint)
             print(f"Checkpoint saved at Epoch : {epoch}, at location : {str(fpath_checkpoint)}")
             logger.info(
@@ -351,10 +353,9 @@ def train_transformer(
     # inference on test set
     checkpoint = torch.load(fpath_checkpoint)
     model = TimeSeriesTransformer(
-        input_size=len(input_variables),
-        dec_seq_len=enc_seq_len,
+        input_size=input_size,
         batch_first=batch_first,
-        num_predicted_features=1,
+        num_predicted_features=num_predicted_features,
     )
     model.to(device)
     model.load_state_dict(checkpoint["model"])

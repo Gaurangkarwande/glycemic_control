@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 from typing import List, Tuple
 
 import pandas as pd
@@ -174,70 +173,6 @@ def get_patient_indices(
         total_samples += patient_num_samples
 
     return indices, total_samples
-
-
-def read_data(fpath_data: Path, timestamp_col_name: str = "timestamp") -> pd.DataFrame:
-    """
-    Read data from csv file and return pd.Dataframe object
-    Args:
-        data_dir: str or Path object specifying the path to the csv file
-        timestamp_col_name: str, the name of the column or named index
-                            containing the timestamps
-    """
-
-    print("Reading file in {}".format(fpath_data))
-
-    data = pd.read_csv(
-        fpath_data,
-        parse_dates=[timestamp_col_name],
-        index_col=[timestamp_col_name],
-        infer_datetime_format=True,
-        low_memory=False,
-    )
-
-    # Make sure all "n/e" values have been removed from df.
-    if is_ne_in_df(data):
-        raise ValueError("data frame contains 'n/e' values. These must be handled")
-
-    data = to_numeric_and_downcast_data(data)
-
-    # Make sure data is in ascending order by timestamp
-    data.sort_values(by=[timestamp_col_name], inplace=True)
-
-    return data
-
-
-def is_ne_in_df(df: pd.DataFrame):
-    """
-    Some raw data files contain cells with "n/e". This function checks whether
-    any column in a df contains a cell with "n/e". Returns False if no columns
-    contain "n/e", True otherwise
-    """
-
-    for col in df.columns:
-
-        true_bool = df[col] == "n/e"
-
-        if any(true_bool):
-            return True
-
-    return False
-
-
-def to_numeric_and_downcast_data(df: pd.DataFrame):
-    """
-    Downcast columns in df to smallest possible version of it's existing data
-    type
-    """
-    fcols = df.select_dtypes("float").columns
-
-    icols = df.select_dtypes("integer").columns
-
-    df[fcols] = df[fcols].apply(pd.to_numeric, downcast="float")
-
-    df[icols] = df[icols].apply(pd.to_numeric, downcast="integer")
-
-    return df
 
 
 class LRScheduler:
