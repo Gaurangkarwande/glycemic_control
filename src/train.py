@@ -24,7 +24,7 @@ from src.utils import (
 
 GLOBAL_SEED = 123
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+# device = torch.device("cpu")
 
 
 def train(
@@ -63,7 +63,7 @@ def train(
 
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optimizer.step()
         loss_epoch += float(loss.item())
     time_for_epoch = time.time() - start
@@ -136,12 +136,12 @@ def train_transformer(
     logger = logging.getLogger("transformer")
 
     # Hyperparams
-    batch_size = 4
-    lr = 1e-3
-    num_epochs = 20
+    batch_size = 32
+    lr = 1e-2
+    num_epochs = 100
 
     # Params
-    enc_seq_len = 4  # length of input given to encoder
+    enc_seq_len = 6  # length of input given to encoder
     output_sequence_length = 1  # how many future glucose values to predict
     step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
     batch_first = True
@@ -168,15 +168,29 @@ def train_transformer(
     print(f"Model hyperparameters: \nBatch size: {batch_size} \nLearning rate: {lr}")
 
     # df to patient tensor
-    scaler = get_normalizing_scaler(df_train[input_variables])
+    scaler_x = get_normalizing_scaler(df_train[input_variables].values)
+    scaler_y = get_normalizing_scaler(df_train[TARGET_COL].values)
+
     X_train, y_train = df_to_patient_tensors(
-        df_train, feature_cols=input_variables, target_col=TARGET_COL, scaler=scaler
+        df_train,
+        feature_cols=input_variables,
+        target_col=TARGET_COL,
+        scaler_x=scaler_x,
+        scaler_y=scaler_y,
     )
     X_valid, y_valid = df_to_patient_tensors(
-        df_valid, feature_cols=input_variables, target_col=TARGET_COL, scaler=scaler
+        df_valid,
+        feature_cols=input_variables,
+        target_col=TARGET_COL,
+        scaler_x=scaler_x,
+        scaler_y=scaler_y,
     )
     X_test, y_test = df_to_patient_tensors(
-        df_test, feature_cols=input_variables, target_col=TARGET_COL, scaler=scaler
+        df_test,
+        feature_cols=input_variables,
+        target_col=TARGET_COL,
+        scaler_x=scaler_x,
+        scaler_y=scaler_y,
     )
 
     # get subsequence indices
@@ -187,7 +201,7 @@ def train_transformer(
         y_valid, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
     )
     indices_test, num_samples_test = get_patient_indices(
-        y_valid, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
+        y_test, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
     )
 
     logger.info(
@@ -259,7 +273,7 @@ def train_transformer(
 
     # transfer to GPU
 
-    train_on_gpu = False
+    train_on_gpu = torch.cuda.is_available()
     if train_on_gpu:
         print("Training on GPU")
     else:
@@ -330,7 +344,7 @@ def train_transformer(
         if early_stopping.early_stop:
             break
 
-    logger.info(f'Final scheduler state {lr_scheduler.get_final_lr()}\n')
+    logger.info(f"Final scheduler state {lr_scheduler.get_final_lr()}\n")
     del model
     del optimizer
     gc.collect()
@@ -339,7 +353,7 @@ def train_transformer(
     # save curves
     plt.plot(range(len(train_history_loss)), train_history_loss, label="Train MSE")
     plt.plot(range(len(val_history_loss)), val_history_loss, label="Val MSE")
-    plt.ylim(top=5000)
+    # plt.ylim(top=5000)
     plt.xlabel("Epoch")
     plt.ylabel("MSE Loss")
     plt.legend()
