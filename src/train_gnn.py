@@ -58,16 +58,16 @@ def train(
         edge_attr = snapshot.edge_attr.to(device)
         y = snapshot.y.to(device)
         y_hat = model(x, edge_index, edge_attr)
-        batch_loss += torch.mean((y_hat - y) ** 2)
-        epoch_loss += torch.mean((y_hat - y) ** 2)
+        loss = torch.mean((y_hat - y) ** 2)
+        epoch_loss += loss
+        batch_loss += loss
         if (batch_id + 1) % 32 == 0:
             optimizer.zero_grad()
-            batch_loss = batch_loss / (batch_id + 1)
             batch_loss.backward()
             optimizer.step()
             batch_loss = 0
     time_for_epoch = time.time() - start
-    return epoch_loss, time_for_epoch
+    return epoch_loss.item()/(batch_id), time_for_epoch
 
 
 def evaluate(

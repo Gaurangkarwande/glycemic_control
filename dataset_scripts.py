@@ -67,7 +67,7 @@ def train_valid_test_splits_v1(
     """Split the dataset into train valid and test splits. This does patient-wise splitting.
     We split the patients into train, valid and test patients. Underlying assumption each patient
     is a sample is IID.
-    Train : valid : test = 70 : 10 : 20
+    Train : valid : test = 60 : 20 : 20
 
     Args:
         df : the dataframe of all patients
@@ -79,7 +79,7 @@ def train_valid_test_splits_v1(
     patient_ids = df.subject_id.unique()
     train_patients, test_patients = train_test_split(patient_ids, test_size=0.2, random_state=seed)
     train_patients, valid_patients = train_test_split(
-        train_patients, test_size=0.1, random_state=seed
+        train_patients, test_size=0.25, random_state=seed
     )
     df_train = df[df.subject_id.isin(set(train_patients))]
     df_valid = df[df.subject_id.isin(set(valid_patients))]
