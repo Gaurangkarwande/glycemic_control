@@ -338,7 +338,15 @@ def stack_dataset_featues_target(
     return features, targets
 
 
-def get_adjacency_coo(adj_matrix: np.ndarray):
+def get_adjacency_coo(adj_matrix: np.ndarray) -> np.ndarray:
+    """Convert adjacency matrix to COO format for pytorch_geometric
+
+    Args:
+        adj_matrix: the adjacency matrix to convert
+
+    Returns: adjacency matrix in COO format
+    """
+
     source = []
     destination = []
 
@@ -352,9 +360,7 @@ def get_adjacency_coo(adj_matrix: np.ndarray):
     return coo_adjacency
 
 
-def get_normalizing_scaler(
-    X_train: np.array
-) -> SCALER_TYPE:
+def get_normalizing_scaler(X_train: np.array) -> SCALER_TYPE:
     """Get the preprocessing scaler that normalizes the feature values
 
     Args:

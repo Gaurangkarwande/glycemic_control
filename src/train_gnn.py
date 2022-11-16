@@ -12,24 +12,17 @@ import torch
 from torch_geometric_temporal.signal import StaticGraphTemporalSignal
 
 from src.constants import CONTINUOUS_COVARIATES_PROCESSED, STATIC_COLS, TARGET_COL
-from src.dataset import (
-    GraphDataset,
-    df_to_patient_tensors,
-    get_normalizing_scaler,
-    stack_dataset_featues_target,
-    get_adjacency_coo,
-)
+from src.dataloader import get_dataloaders
 from src.models.temporal_gnn import RecurrentGCN
 from src.utils import (
     EarlyStopping,
     LRScheduler,
-    get_patient_indices,
     get_timestamp,
 )
 
 GLOBAL_SEED = 123
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# device = torch.device("cpu")
+device = torch.device("cpu")
 
 
 def train(
@@ -50,24 +43,23 @@ def train(
     """
 
     start = time.time()
-    epoch_loss = batch_loss = 0
+    epoch_loss = num_samples = 0
     model.train()
     for batch_id, snapshot in enumerate(dataloader):
         x = snapshot.x.to(device)
         edge_index = snapshot.edge_index.to(device)
         edge_attr = snapshot.edge_attr.to(device)
         y = snapshot.y.to(device)
-        y_hat = model(x, edge_index, edge_attr)
+        batch = snapshot.batch.to(device)
+        y_hat = model(x, edge_index, edge_attr, batch)
         loss = torch.mean((y_hat - y) ** 2)
-        epoch_loss += loss
-        batch_loss += loss
-        if (batch_id + 1) % 32 == 0:
-            optimizer.zero_grad()
-            batch_loss.backward()
-            optimizer.step()
-            batch_loss = 0
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+        num_samples += y.size(0)
     time_for_epoch = time.time() - start
-    return epoch_loss.item()/(batch_id), time_for_epoch
+    return epoch_loss, time_for_epoch
 
 
 def evaluate(
@@ -86,7 +78,7 @@ def evaluate(
     """
 
     start = time.time()
-    cost = 0
+    epoch_loss = num_samples = 0
     model.eval()
     with torch.no_grad():
         for batch_id, snapshot in enumerate(dataloader):
@@ -94,11 +86,13 @@ def evaluate(
             edge_index = snapshot.edge_index.to(device)
             edge_attr = snapshot.edge_attr.to(device)
             y = snapshot.y.to(device)
-            y_hat = model(x, edge_index, edge_attr)
-            cost = cost + torch.mean((y_hat - y) ** 2)
-        cost = cost / (batch_id + 1)
+            batch = snapshot.batch.to(device)
+            y_hat = model(x, edge_index, edge_attr, batch)
+            loss = torch.mean((y_hat - y) ** 2)
+            epoch_loss += loss.item()
+            num_samples += y.size(0)
     time_for_epoch = time.time() - start
-    return cost.item(), time_for_epoch
+    return epoch_loss, time_for_epoch
 
 
 def train_gnn(
@@ -128,7 +122,7 @@ def train_gnn(
     logger = logging.getLogger("transformer")
 
     # Hyperparams
-    # batch_size = 32
+    batch_size = 32
     lr = 1e-2
     num_epochs = 100
 
@@ -143,8 +137,6 @@ def train_gnn(
     )  # Each element must correspond to a column name
     input_variables = TARGET_COL + exogenous_vars
 
-    input_size = len(input_variables)
-
     logger.info(
         f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
         f" {output_sequence_length} \nStep size: {step_size}"
@@ -157,106 +149,23 @@ def train_gnn(
     # logger.info(f"Model hyperparameters: \nBatch size: {batch_size} \nLearning rate: {lr}")
     # print(f"Model hyperparameters: \nBatch size: {batch_size} \nLearning rate: {lr}")
 
-    # df to patient tensor
-    scaler_x = get_normalizing_scaler(df_train[input_variables].values)
-    scaler_y = get_normalizing_scaler(df_train[TARGET_COL].values)
+    # create dataset
 
-    X_train, y_train = df_to_patient_tensors(
-        df_train,
-        feature_cols=input_variables,
-        target_col=TARGET_COL,
-        scaler_x=scaler_x,
-        scaler_y=scaler_y,
-    )
-    X_valid, y_valid = df_to_patient_tensors(
-        df_valid,
-        feature_cols=input_variables,
-        target_col=TARGET_COL,
-        scaler_x=scaler_x,
-        scaler_y=scaler_y,
-    )
-    X_test, y_test = df_to_patient_tensors(
-        df_test,
-        feature_cols=input_variables,
-        target_col=TARGET_COL,
-        scaler_x=scaler_x,
-        scaler_y=scaler_y,
-    )
-
-    # get subsequence indices
-    indices_train, num_samples_train = get_patient_indices(
-        y_train, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
-    )
-    indices_valid, num_samples_valid = get_patient_indices(
-        y_valid, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
-    )
-    indices_test, num_samples_test = get_patient_indices(
-        y_test, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
-    )
-
-    logger.info(
-        f"Number of training samples: {num_samples_train}"
-        f" \nNumber of valid samples: {num_samples_valid}"
-        f" \nNumber of test samples: {num_samples_test}"
-    )
-    print(
-        f"Number of training samples: {num_samples_train}"
-        f" \nNumber of valid samples: {num_samples_valid}"
-        f" \nNumber of test samples: {num_samples_test}"
-    )
-
-    # create datasets
-
-    dataset_train = GraphDataset(
-        data=X_train,
-        labels=y_train,
-        indices=indices_train,
-        num_samples=num_samples_train,
+    dataloader_train, dataloader_valid, dataloader_test = get_dataloaders(
+        df_train=df_train,
+        df_valid=df_valid,
+        df_test=df_test,
+        input_variables=input_variables,
+        target_variable=TARGET_COL,
         enc_seq_len=enc_seq_len,
-        target_seq_len=output_sequence_length,
-    )
-    dataset_valid = GraphDataset(
-        data=X_valid,
-        labels=y_valid,
-        indices=indices_valid,
-        num_samples=num_samples_valid,
-        enc_seq_len=enc_seq_len,
-        target_seq_len=output_sequence_length,
-    )
-    dataset_test = GraphDataset(
-        data=X_test,
-        labels=y_test,
-        indices=indices_test,
-        num_samples=num_samples_test,
-        enc_seq_len=enc_seq_len,
-        target_seq_len=output_sequence_length,
-    )
-
-    # create dataloaders
-
-    X_train, y_train = stack_dataset_featues_target(dataset_train)
-    X_valid, y_valid = stack_dataset_featues_target(dataset_valid)
-    X_test, y_test = stack_dataset_featues_target(dataset_test)
-
-    adj_matrix = np.ones(shape=(input_size, input_size))
-    for i in range(adj_matrix.shape[0]):
-        adj_matrix[i, i] = 0
-    edge_index = get_adjacency_coo(adj_matrix)
-    edge_weights = np.ones(edge_index.shape[1])
-
-    dataloader_train = StaticGraphTemporalSignal(
-        edge_index=edge_index, edge_weight=edge_weights, features=X_train, targets=y_train
-    )
-    dataloader_valid = StaticGraphTemporalSignal(
-        edge_index=edge_index, edge_weight=edge_weights, features=X_valid, targets=y_valid
-    )
-    dataloader_test = StaticGraphTemporalSignal(
-        edge_index=edge_index, edge_weight=edge_weights, features=X_test, targets=y_test
+        output_sequence_length=output_sequence_length,
+        step_size=step_size,
+        batch_size=batch_size,
     )
 
     # create model
 
-    model = RecurrentGCN(node_features=enc_seq_len)
+    model = RecurrentGCN(node_features=enc_seq_len, batch_size=batch_size)
 
     # Criterion optimizer early stopping lr_scheduler
 
@@ -347,7 +256,7 @@ def train_gnn(
 
     # inference on test set
     checkpoint = torch.load(fpath_checkpoint)
-    model = RecurrentGCN(node_features=enc_seq_len)
+    model = RecurrentGCN(node_features=enc_seq_len, batch_size=batch_size)
     model.to(device)
     model.load_state_dict(checkpoint["model"])
     del checkpoint
