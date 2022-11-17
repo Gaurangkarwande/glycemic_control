@@ -11,6 +11,7 @@ from src.dataset import (
     get_adjacency_coo,
     get_normalizing_scaler,
     stack_dataset_featues_target,
+    get_adjacency_matrix
 )
 from src.utils import get_patient_indices
 from torch_geometric_temporal.signal import StaticGraphTemporalSignal
@@ -20,6 +21,7 @@ def get_dataloaders(
     df_train: pd.DataFrame,
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
+    df_dag: Optional[pd.DataFrame],
     input_variables: List[str],
     target_variable: str,
     enc_seq_len: int,
@@ -34,6 +36,7 @@ def get_dataloaders(
         df_train: training data
         df_test: training data
         df_test: training data
+        df_dag: the dag
         input_variable: the names of all covariates
         target_variable: the name of the target col in dataframe
         enc_seq_len: the number of time steps given as input
@@ -128,9 +131,14 @@ def get_dataloaders(
     X_valid, y_valid = stack_dataset_featues_target(dataset_valid)
     X_test, y_test = stack_dataset_featues_target(dataset_test)
 
-    adj_matrix = np.ones(shape=(len(input_variables), len(input_variables)))
-    for i in range(adj_matrix.shape[0]):
-        adj_matrix[i, i] = 0
+    # create adjacency matrix
+
+    adj_matrix = get_adjacency_matrix(df_dag)
+    if adj_matrix is None:
+        adj_matrix = np.ones(shape=(len(input_variables), len(input_variables)))
+        for i in range(adj_matrix.shape[0]):
+            adj_matrix[i, i] = 0
+        logger.info("Running with fully connected DAG")
 
     edge_index, edge_weights = get_adjacency_coo(adj_matrix)
 

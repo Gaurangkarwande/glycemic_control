@@ -3,7 +3,7 @@ import gc
 import logging
 import time
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -58,7 +58,7 @@ def train(
         optimizer.step()
         epoch_loss += loss.item()
     time_for_epoch = time.time() - start
-    return epoch_loss/len(dataloader), time_for_epoch
+    return epoch_loss / len(dataloader), time_for_epoch
 
 
 def evaluate(
@@ -90,11 +90,15 @@ def evaluate(
             loss = torch.mean((y_hat - y) ** 2)
             epoch_loss += loss.item()
     time_for_epoch = time.time() - start
-    return epoch_loss/len(dataloader), time_for_epoch
+    return epoch_loss / len(dataloader), time_for_epoch
 
 
 def train_gnn(
-    df_train: pd.DataFrame, df_valid: pd.DataFrame, df_test: pd.DataFrame, dirpath_out: Path
+    df_train: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    df_test: pd.DataFrame,
+    df_dag: Optional[pd.DataFrame],
+    dirpath_out: Path,
 ) -> None:
     """Train the transformer model
 
@@ -102,6 +106,7 @@ def train_gnn(
         df_train: training data
         df_test: training data
         df_test: training data
+        df_dag: the DAG adjacency matrix
         dirpath_out: path to where training runs will be recorded
 
     Returns:
@@ -150,6 +155,7 @@ def train_gnn(
         df_train=df_train,
         df_valid=df_valid,
         df_test=df_test,
+        df_dag=df_dag,
         input_variables=input_variables,
         target_variable=TARGET_COL,
         enc_seq_len=enc_seq_len,
@@ -278,6 +284,12 @@ def parse_args():
         "--fpath_test_data", type=Path, help="path to test dataframe", required=True
     )
     parser.add_argument(
+        "--fpath_dag", type=Path, help="path to test dataframe", required=False, default=None
+    )
+    parser.add_argument(
+        "--dag_type", type=str, help="diabetic, non, or all", required=False, default=None
+    )
+    parser.add_argument(
         "--dirpath_results",
         type=Path,
         help="path to where training runs will be recorded",
@@ -295,4 +307,5 @@ if __name__ == "__main__":
     df_train = pd.read_csv(args.fpath_train_data)
     df_valid = pd.read_csv(args.fpath_valid_data)
     df_test = pd.read_csv(args.fpath_test_data)
-    train_gnn(df_train, df_valid, df_test, dirpath_out=dirpath_save)
+    df_dag = pd.read_csv(args.fpath_dag) if args.fpath_dag is not None else None
+    train_gnn(df_train, df_valid, df_test, df_dag, dirpath_out=dirpath_save)

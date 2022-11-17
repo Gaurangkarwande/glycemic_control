@@ -1,10 +1,12 @@
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.preprocessing import RobustScaler
 from torch.utils.data import Dataset
+
+from src.constants import INPUT_COVARIATES
 
 
 SCALER_TYPE = RobustScaler
@@ -336,6 +338,24 @@ def stack_dataset_featues_target(
         features.append(snapshot[0].T.numpy())
         targets.append(snapshot[1].numpy())
     return features, targets
+
+
+def get_adjacency_matrix(df_dag: Optional[pd.DataFrame]) -> np.ndarray:
+    """Get adjacency matrix from dataframe
+
+    Args:
+        df_dag: the dag dataframe
+
+    Returns: the adjacency matrix
+    """
+
+    if df_dag is None:
+        return None
+    adj_matrix = df_dag[INPUT_COVARIATES].to_numpy()  # this is an upper triangular matrix
+    for row in range(adj_matrix.shape[0]):
+        for col in range(row):
+            adj_matrix[row, col] = adj_matrix[col, row]
+    return adj_matrix
 
 
 def get_adjacency_coo(adj_matrix: np.ndarray) -> np.ndarray:
