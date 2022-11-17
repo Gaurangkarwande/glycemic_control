@@ -132,8 +132,7 @@ def get_dataloaders(
     for i in range(adj_matrix.shape[0]):
         adj_matrix[i, i] = 0
 
-    edge_index = get_adjacency_coo(adj_matrix)
-    edge_weights = np.ones(edge_index.shape[1])
+    edge_index, edge_weights = get_adjacency_coo(adj_matrix)
 
     dataloader_train_temp = StaticGraphTemporalSignal(
         edge_index=edge_index, edge_weight=edge_weights, features=X_train, targets=y_train

@@ -4,7 +4,7 @@ from torch_geometric_temporal.nn.recurrent import DCRNN
 from torch_geometric.nn.pool import global_mean_pool
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+# device = torch.device("cpu")
 
 
 class RecurrentGCN(torch.nn.Module):

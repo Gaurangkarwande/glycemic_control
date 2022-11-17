@@ -349,15 +349,18 @@ def get_adjacency_coo(adj_matrix: np.ndarray) -> np.ndarray:
 
     source = []
     destination = []
+    edge_weights = []
 
     for i in range(adj_matrix.shape[0]):
         for j in range(adj_matrix.shape[1]):
-            if adj_matrix[i, j] == 1:
+            if adj_matrix[i, j] > 0:
                 source.append(i)
                 destination.append(j)
+                edge_weights.append(adj_matrix[i, j])
 
     coo_adjacency = np.stack([source, destination])
-    return coo_adjacency
+    edge_weights = np.array(edge_weights)
+    return coo_adjacency, edge_weights
 
 
 def get_normalizing_scaler(X_train: np.array) -> SCALER_TYPE:
