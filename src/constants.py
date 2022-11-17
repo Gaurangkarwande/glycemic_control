@@ -82,3 +82,21 @@ CONTINUOUS_COVARIATES_PROCESSED = [
 ]
 
 STATIC_COLS = ["weight_kg", "height_cm", "bmi", "admission_age"]
+
+INPUT_COVARIATES = [
+    "sofa_24hours",
+    "liver_24hours",
+    "weight_kg",
+    "height_cm",
+    "bmi",
+    "cns_24hours",
+    "admission_age",
+    "cardiovascular_24hours",
+    "tube_feeding",
+    "charlson_comorbidity_index",
+    "dextrose",
+    "coagulation_24hours",
+    "respiration_24hours",
+    "renal_24hours",
+    "insulin",
+]
