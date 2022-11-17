@@ -11,7 +11,7 @@ import pandas as pd
 import torch
 from torch_geometric_temporal.signal import StaticGraphTemporalSignal
 
-from src.constants import CONTINUOUS_COVARIATES_PROCESSED, STATIC_COLS, TARGET_COL
+from src.constants import INPUT_COVARIATES, TARGET_COL
 from src.dataloader import get_dataloaders
 from src.models.temporal_gnn import RecurrentGCN
 from src.utils import (
@@ -22,7 +22,7 @@ from src.utils import (
 
 GLOBAL_SEED = 123
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+# device = torch.device("cpu")
 
 
 def train(
@@ -43,7 +43,7 @@ def train(
     """
 
     start = time.time()
-    epoch_loss = num_samples = 0
+    epoch_loss = 0
     model.train()
     for batch_id, snapshot in enumerate(dataloader):
         x = snapshot.x.to(device)
@@ -57,9 +57,8 @@ def train(
         loss.backward()
         optimizer.step()
         epoch_loss += loss.item()
-        num_samples += y.size(0)
     time_for_epoch = time.time() - start
-    return epoch_loss, time_for_epoch
+    return epoch_loss/len(dataloader), time_for_epoch
 
 
 def evaluate(
@@ -78,7 +77,7 @@ def evaluate(
     """
 
     start = time.time()
-    epoch_loss = num_samples = 0
+    epoch_loss = 0
     model.eval()
     with torch.no_grad():
         for batch_id, snapshot in enumerate(dataloader):
@@ -90,9 +89,8 @@ def evaluate(
             y_hat = model(x, edge_index, edge_attr, batch)
             loss = torch.mean((y_hat - y) ** 2)
             epoch_loss += loss.item()
-            num_samples += y.size(0)
     time_for_epoch = time.time() - start
-    return epoch_loss, time_for_epoch
+    return epoch_loss/len(dataloader), time_for_epoch
 
 
 def train_gnn(
@@ -132,10 +130,7 @@ def train_gnn(
     step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
 
     # Define input variables
-    exogenous_vars = (
-        CONTINUOUS_COVARIATES_PROCESSED + STATIC_COLS
-    )  # Each element must correspond to a column name
-    input_variables = TARGET_COL + exogenous_vars
+    input_variables = INPUT_COVARIATES + TARGET_COL
 
     logger.info(
         f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
