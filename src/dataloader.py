@@ -11,7 +11,8 @@ from src.dataset import (
     get_adjacency_coo,
     get_normalizing_scaler,
     stack_dataset_featues_target,
-    get_adjacency_matrix
+    get_adjacency_matrix,
+    SCALER_TYPE,
 )
 from src.utils import get_patient_indices
 from torch_geometric_temporal.signal import StaticGraphTemporalSignal
@@ -29,7 +30,7 @@ def get_dataloaders(
     step_size: int,
     batch_size: int,
     logger: Optional[Logger] = None,
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
+) -> Tuple[DataLoader, DataLoader, DataLoader, SCALER_TYPE]:
     """Convert given dataframes into ML dataset
 
     Args:
@@ -45,7 +46,9 @@ def get_dataloaders(
         batch_size: the batch size for batching
         logger: the logger object
 
-    Returns: the train, valid, and test dataloader
+    Returns:
+        the train, valid, and test dataloader
+        the scaler for target variable
     """
 
     # df to patient tensor
@@ -158,4 +161,4 @@ def get_dataloaders(
     dataloader_valid = DataLoader(dataset=list(dataloader_valid_temp), batch_size=batch_size)
     dataloader_test = DataLoader(dataset=list(dataloader_test_temp), batch_size=batch_size)
 
-    return dataloader_train, dataloader_valid, dataloader_test
+    return dataloader_train, dataloader_valid, dataloader_test, scaler_y

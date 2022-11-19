@@ -3,7 +3,7 @@ import gc
 import logging
 import time
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -93,12 +93,56 @@ def evaluate(
     return epoch_loss / len(dataloader), time_for_epoch
 
 
+def inference(
+    model: torch.nn.Module,
+    dataloader: StaticGraphTemporalSignal,
+) -> Tuple[float, float, List[float], List[float]]:
+    """Train the model
+
+    Args:
+        model: the model to train
+        dataloader: the training dataloader
+
+    Returns:
+        avg_loss: the average loss for the epoch
+        time: the time taken for inference
+        predictions: the predicted glucose values. These are normalized
+        gts: the ground truth values. These are normalized.
+    """
+
+    start = time.time()
+    epoch_loss = 0
+    model.eval()
+    gts = []
+    predictions = []
+    with torch.no_grad():
+        for batch_id, snapshot in enumerate(dataloader):
+            x = snapshot.x.to(device)
+            edge_index = snapshot.edge_index.to(device)
+            edge_attr = snapshot.edge_attr.to(device)
+            y = snapshot.y.to(device)
+            batch = snapshot.batch.to(device)
+            y_hat = model(x, edge_index, edge_attr, batch)
+            loss = torch.mean((y_hat - y) ** 2)
+            epoch_loss += loss.item()
+            gts.extend(y.tolist())
+            predictions.extend(y_hat.tolist())
+    time_taken = time.time() - start
+    return (
+        epoch_loss / len(dataloader),
+        time_taken,
+        np.array(predictions).reshape(-1, 1),
+        np.array(gts).reshape(-1, 1),
+    )
+
+
 def train_gnn(
     df_train: pd.DataFrame,
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
     df_dag: Optional[pd.DataFrame],
     dirpath_out: Path,
+    logger: logging.Logger,
 ) -> None:
     """Train the transformer model
 
@@ -116,16 +160,9 @@ def train_gnn(
     start = time.time()
     np.random.seed(GLOBAL_SEED)
     torch.manual_seed(GLOBAL_SEED)
-    logging.basicConfig(
-        filename=dirpath_out.joinpath("transformer_training.log"),
-        format="%(asctime)s %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-    logger = logging.getLogger("transformer")
 
     # Hyperparams
-    batch_size = 32
+    batch_size = 256
     lr = 1e-2
     num_epochs = 100
 
@@ -151,7 +188,7 @@ def train_gnn(
 
     # create dataset
 
-    dataloader_train, dataloader_valid, dataloader_test = get_dataloaders(
+    dataloader_train, dataloader_valid, dataloader_test, scaler_y = get_dataloaders(
         df_train=df_train,
         df_valid=df_valid,
         df_test=df_test,
@@ -162,6 +199,7 @@ def train_gnn(
         output_sequence_length=output_sequence_length,
         step_size=step_size,
         batch_size=batch_size,
+        logger=logger
     )
 
     # create model
@@ -186,6 +224,7 @@ def train_gnn(
     # setup paths
 
     fpath_curve_plot = dirpath_out.joinpath("loss_curve.jpg")
+    fpath_inference_df = dirpath_out.joinpath("inference.csv")
     dirpath_checkpoint = dirpath_out.joinpath("model_checkpoint")
     dirpath_checkpoint.mkdir()
     fpath_checkpoint = None
@@ -262,7 +301,19 @@ def train_gnn(
     model.load_state_dict(checkpoint["model"])
     del checkpoint
 
-    loss_test, _ = evaluate(model=model, dataloader=dataloader_test)
+    loss_test, _, predicted_values, gts = inference(model=model, dataloader=dataloader_test)
+    inv_scaled_gt = scaler_y.inverse_transform(gts)
+    inv_scaled_predictions = scaler_y.inverse_transform(predicted_values)
+    inference_result = pd.DataFrame(
+        zip(
+            gts.squeeze(),
+            predicted_values.squeeze(),
+            inv_scaled_gt.squeeze(),
+            inv_scaled_predictions.squeeze(),
+        ),
+        columns=["gt_scaled", "predicted_scaled", "gt_inv_scaled", "predicted_inv_scaled"],
+    )
+    inference_result.to_csv(fpath_inference_df)
 
     time_taken = time.time() - start
 
@@ -308,4 +359,32 @@ if __name__ == "__main__":
     df_valid = pd.read_csv(args.fpath_valid_data)
     df_test = pd.read_csv(args.fpath_test_data)
     df_dag = pd.read_csv(args.fpath_dag) if args.fpath_dag is not None else None
-    train_gnn(df_train, df_valid, df_test, df_dag, dirpath_out=dirpath_save)
+    dag_type = args.dag_type if args.dag_type is not None else ""
+    dag_name = args.fpath_dag.stem if args.fpath_dag is not None else "fully_connected"
+
+    # create logger
+    logging.basicConfig(
+        filename=dirpath_save.joinpath(f"graph_{dag_type}_{dag_name}.log"),
+        format="%(asctime)s %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
+    logger = logging.getLogger("graph")
+
+    # log paths
+
+    logger.info(f"fpath_train: {str(args.fpath_train_data)}")
+    logger.info(f"fpath_train: {str(args.fpath_valid_data)}")
+    logger.info(f"fpath_train: {str(args.fpath_test_data)}")
+    logger.info(f"fpath_dag: {args.fpath_dag}")
+    logger.info(f"dag_type: {str(dag_type)}")
+    logger.info(f"dag_name: {str(dag_name)}")
+
+    train_gnn(
+        df_train=df_train,
+        df_valid=df_valid,
+        df_test=df_test,
+        df_dag=df_dag,
+        dirpath_out=dirpath_save,
+        logger=logger,
+    )

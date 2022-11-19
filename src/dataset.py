@@ -6,7 +6,7 @@ import torch
 from sklearn.preprocessing import RobustScaler
 from torch.utils.data import Dataset
 
-from src.constants import INPUT_COVARIATES
+from src.constants import INPUT_COVARIATES, TARGET_COL
 
 
 SCALER_TYPE = RobustScaler
@@ -351,10 +351,12 @@ def get_adjacency_matrix(df_dag: Optional[pd.DataFrame]) -> np.ndarray:
 
     if df_dag is None:
         return None
-    adj_matrix = df_dag[INPUT_COVARIATES].to_numpy()  # this is an upper triangular matrix
+    adj_matrix = df_dag[INPUT_COVARIATES + TARGET_COL].to_numpy()
+    # this is an upper triangular matrix
     for row in range(adj_matrix.shape[0]):
         for col in range(row):
             adj_matrix[row, col] = adj_matrix[col, row]
+    assert (adj_matrix == adj_matrix.T).all(), "Adjacency matrix not symmetric"
     return adj_matrix
 
 
