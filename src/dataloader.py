@@ -30,6 +30,7 @@ def get_dataloaders(
     step_size: int,
     batch_size: int,
     logger: Optional[Logger] = None,
+    verbose: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, SCALER_TYPE]:
     """Convert given dataframes into ML dataset
 
@@ -45,6 +46,7 @@ def get_dataloaders(
         step_size: the window time step
         batch_size: the batch size for batching
         logger: the logger object
+        verbose: whether to print details
 
     Returns:
         the train, valid, and test dataloader
@@ -88,18 +90,18 @@ def get_dataloaders(
         y_test, input_seq_len=enc_seq_len, forecast_len=output_sequence_length, step_size=step_size
     )
 
-    if logger is not None:
-        logger.info(
-            f"Number of training samples: {num_samples_train}"
-            f" \nNumber of valid samples: {num_samples_valid}"
-            f" \nNumber of test samples: {num_samples_test}"
-        )
-
-    print(
+    logger.info(
         f"Number of training samples: {num_samples_train}"
         f" \nNumber of valid samples: {num_samples_valid}"
         f" \nNumber of test samples: {num_samples_test}"
     )
+
+    if verbose:
+        print(
+            f"Number of training samples: {num_samples_train}"
+            f" \nNumber of valid samples: {num_samples_valid}"
+            f" \nNumber of test samples: {num_samples_test}"
+        )
 
     # create datasets
 
@@ -144,6 +146,8 @@ def get_dataloaders(
         logger.info("Running with fully connected DAG")
 
     edge_index, edge_weights = get_adjacency_coo(adj_matrix)
+
+    logger.info(f"ADJACENCY MATRIX - Number of edges is {len(edge_weights)}")
 
     dataloader_train_temp = StaticGraphTemporalSignal(
         edge_index=edge_index, edge_weight=edge_weights, features=X_train, targets=y_train

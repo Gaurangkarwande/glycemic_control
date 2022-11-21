@@ -143,7 +143,8 @@ def train_gnn(
     df_dag: Optional[pd.DataFrame],
     dirpath_out: Path,
     logger: logging.Logger,
-) -> None:
+    verbose: bool = True,
+) -> float:
     """Train the transformer model
 
     Args:
@@ -152,8 +153,9 @@ def train_gnn(
         df_test: training data
         df_dag: the DAG adjacency matrix
         dirpath_out: path to where training runs will be recorded
+        verbose: whether to print details
 
-    Returns:
+    Returns: the inference loss
         # TODO: df_results: the dataframe housing the results
     """
 
@@ -162,7 +164,7 @@ def train_gnn(
     torch.manual_seed(GLOBAL_SEED)
 
     # Hyperparams
-    batch_size = 256
+    batch_size = 4
     lr = 1e-2
     num_epochs = 100
 
@@ -178,13 +180,12 @@ def train_gnn(
         f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
         f" {output_sequence_length} \nStep size: {step_size}"
     )
-    print(
-        f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
-        f" {output_sequence_length} \nStep size: {step_size}"
-    )
 
-    # logger.info(f"Model hyperparameters: \nBatch size: {batch_size} \nLearning rate: {lr}")
-    # print(f"Model hyperparameters: \nBatch size: {batch_size} \nLearning rate: {lr}")
+    if verbose:
+        print(
+            f"Time series params: \nInput sequence lenght: {enc_seq_len} \nOutput sequence lenght:"
+            f" {output_sequence_length} \nStep size: {step_size}"
+        )
 
     # create dataset
 
@@ -199,7 +200,8 @@ def train_gnn(
         output_sequence_length=output_sequence_length,
         step_size=step_size,
         batch_size=batch_size,
-        logger=logger
+        logger=logger,
+        verbose=verbose,
     )
 
     # create model
@@ -210,16 +212,18 @@ def train_gnn(
 
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    early_stopping = EarlyStopping(patience=20)
-    lr_scheduler = LRScheduler(optimizer)
+    early_stopping = EarlyStopping(patience=20, verbose=verbose)
+    lr_scheduler = LRScheduler(optimizer, verbose=verbose)
 
     # transfer to GPU
 
     train_on_gpu = torch.cuda.is_available()
-    if train_on_gpu:
-        print("Training on GPU")
-    else:
-        print("No GPU available, training on CPU")
+
+    if verbose:
+        if train_on_gpu:
+            print("Training on GPU")
+        else:
+            print("No GPU available, training on CPU")
 
     # setup paths
 
@@ -231,7 +235,9 @@ def train_gnn(
 
     # training
     logger.info("****** Training ******")
-    print("****** Training ******")
+    if verbose:
+        print("****** Training ******")
+
     model.to(device)
 
     train_history_loss = []
@@ -242,10 +248,11 @@ def train_gnn(
             model=model, dataloader=dataloader_train, optimizer=optimizer
         )
         loss_valid, _ = evaluate(model=model, dataloader=dataloader_valid)
-        print(
-            f"Epoch {epoch}: Train Loss= {loss_train:.3f} \t Valid Loss= {loss_valid:.3f}, \t"
-            f" Training Time ={time_train:.2f} s"
-        )
+        if verbose:
+            print(
+                f"Epoch {epoch}: Train Loss= {loss_train:.3f} \t Valid Loss= {loss_valid:.3f}, \t"
+                f" Training Time ={time_train:.2f} s"
+            )
         logger.info(
             f"Epoch {epoch}: Train Loss= {loss_train:.3f} \t Valid Loss= {loss_valid:.3f}, \t"
             f" Training Time ={time_train:.2f} s"
@@ -261,7 +268,8 @@ def train_gnn(
             }
             fpath_checkpoint = dirpath_checkpoint.joinpath("best_checkpoint.pth")
             torch.save(checkpoint, fpath_checkpoint)
-            print(f"Checkpoint saved at Epoch : {epoch}, at location : {str(fpath_checkpoint)}")
+            if verbose:
+                print(f"Checkpoint saved at Epoch : {epoch}, at location : {str(fpath_checkpoint)}")
             logger.info(
                 f"Checkpoint saved at Epoch : {epoch}, at location : {str(fpath_checkpoint)}"
             )
@@ -292,7 +300,8 @@ def train_gnn(
     plt.close()
 
     logger.info("******* Finished Training *******")
-    print("******* Finished training ********")
+    if verbose:
+        print("******* Finished training ********")
 
     # inference on test set
     checkpoint = torch.load(fpath_checkpoint)
@@ -318,9 +327,15 @@ def train_gnn(
     time_taken = time.time() - start
 
     logger.info(f"Final test MSE loss: {loss_test}")
-    print(f"Final test MSE loss: {loss_test}")
-    print(f"Total time taken: {time_taken} s")
+    if verbose:
+        print(f"Final test MSE loss: {loss_test}")
+        print(f"Total time taken: {time_taken} s")
     logger.info(f"Total time taken: {time_taken} s")
+
+    del model
+    torch.cuda.empty_cache()
+    gc.collect()
+    return loss_test
 
 
 def parse_args():
