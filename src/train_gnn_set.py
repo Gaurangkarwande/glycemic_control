@@ -112,7 +112,7 @@ def run_dag_set(
     assert len(fpaths_dags) == len(dag_types)
 
     dag_losses = []
-    with mp.Pool(processes=4) as pool:
+    with mp.Pool(processes=8) as pool:
         for test_loss in pool.starmap(
             run_experiment,
             zip(
@@ -197,8 +197,8 @@ if __name__ == "__main__":
         df_train=df_train,
         df_valid=df_valid,
         df_test=df_test,
-        fpaths_dags=fpaths_dags[-8:],
-        dag_types=dag_types[-8:],
+        fpaths_dags=fpaths_dags,
+        dag_types=dag_types,
         dirpath_results=dirpath_dag_set_results,
     )
 
