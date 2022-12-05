@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import torch
 from torch_geometric.loader import DataLoader
 
 from src.dataset import (
@@ -146,8 +147,11 @@ def get_dataloaders(
         logger.info("Running with fully connected DAG")
 
     edge_index, edge_weights = get_adjacency_coo(adj_matrix)
+    # adj_matrix = torch.tensor(adj_matrix)
+    # edge_index = adj_matrix.nonzero().t().contiguous()
+    # edge_weights = torch.ones(edge_index.shape[1])
 
-    logger.info(f"ADJACENCY MATRIX - Number of edges is {len(edge_weights)}")
+    logger.info(f"ADJACENCY MATRIX - Number of edges is {len(edge_weights)//2}")
 
     dataloader_train_temp = StaticGraphTemporalSignal(
         edge_index=edge_index, edge_weight=edge_weights, features=X_train, targets=y_train
