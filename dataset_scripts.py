@@ -103,6 +103,28 @@ def parse_args():
     return args
 
 
+def convert_to_discrete_values(value: int) -> int:
+    """Convert continuous glucose range to classification labels
+
+    Args:
+        value: the continuous glucose value
+
+    Returns: the label mapping
+    """
+
+    if value <= 104:
+        label = 0
+    elif 104 < value <= 119:
+        label = 1
+    elif 119 < value <= 136:
+        label = 2
+    elif 136 < value <= 162:
+        label = 3
+    else:
+        label = 4
+    return label
+
+
 if __name__ == "__main__":
     args = parse_args()
     raw_df = pd.read_csv(args.fpath_raw_csv)
