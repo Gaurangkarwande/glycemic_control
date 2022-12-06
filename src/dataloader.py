@@ -32,7 +32,8 @@ def get_dataloaders(
     batch_size: int,
     logger: Optional[Logger] = None,
     verbose: bool = True,
-) -> Tuple[DataLoader, DataLoader, DataLoader, SCALER_TYPE]:
+    normalize_target: bool = False,
+) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[SCALER_TYPE]]:
     """Convert given dataframes into ML dataset
 
     Args:
@@ -47,7 +48,8 @@ def get_dataloaders(
         step_size: the window time step
         batch_size: the batch size for batching
         logger: the logger object
-        verbose: whether to print details
+        verbose: whether to print details. Default is True.
+        normalize_target: whether to normalize the target variable. Default is False.
 
     Returns:
         the train, valid, and test dataloader
@@ -56,7 +58,12 @@ def get_dataloaders(
 
     # df to patient tensor
     scaler_x = get_normalizing_scaler(df_train[input_variables].values)
-    scaler_y = get_normalizing_scaler(df_train[target_variable].values)
+    scaler_y = None
+    if normalize_target:
+        scaler_y = get_normalizing_scaler(df_train[target_variable].values)
+    else:
+        logger.info("Not Normalizing glucose values")
+        print("Not Normalizing glucose values")
 
     X_train, y_train = df_to_patient_tensors(
         df_train,

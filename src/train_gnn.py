@@ -3,22 +3,18 @@ import gc
 import logging
 import time
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from torch_geometric_temporal.signal import StaticGraphTemporalSignal
 
 from src.constants import INPUT_COVARIATES, TARGET_COL
 from src.dataloader import get_dataloaders
-from src.models.temporal_gnn import RecurrentGCN
-from src.utils import (
-    EarlyStopping,
-    LRScheduler,
-    get_timestamp,
-)
+from src.models.temporal_gnn import RecurrentGCN_classification
+from src.utils import EarlyStopping, LRScheduler, get_timestamp
+from torch_geometric_temporal.signal import StaticGraphTemporalSignal
 
 GLOBAL_SEED = 123
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,21 +25,24 @@ def train(
     model: torch.nn.Module,
     dataloader: StaticGraphTemporalSignal,
     optimizer: Any,
-) -> Tuple[float, float]:
+    criterion: Callable,
+) -> Tuple[float, float, float]:
     """Train the model
 
     Args:
         model: the model to train
         dataloader: the training dataloader
         optimizer: the optimizer to train the model
+        criterion: the loss criterion
 
     Returns:
         avg_loss: the average loss for the epoch
+        accuracy: the classification accuracy
         time: the time taken for a single epoch
     """
 
     start = time.time()
-    epoch_loss = 0
+    epoch_loss = correct = total = 0
     model.train()
     for batch_id, snapshot in enumerate(dataloader):
         x = snapshot.x.to(device)
@@ -51,33 +50,47 @@ def train(
         edge_attr = snapshot.edge_attr.to(device)
         y = snapshot.y.to(device)
         batch = snapshot.batch.to(device)
-        y_hat = model(x, edge_index, edge_attr, batch)
-        loss = torch.mean((y_hat - y) ** 2)
         optimizer.zero_grad()
+
+        # find predictions
+        pred = model(x, edge_index, edge_attr, batch)
+        loss = criterion(pred, y)
+
+        # backpropagate
         loss.backward()
         optimizer.step()
-        epoch_loss += loss.item()
+
+        # get metrics
+        _, pred_classes = pred.max(1)
+        total += y.size(0)
+        correct += float(pred_classes.eq(y).sum().item())
+        epoch_loss += float(loss.item())
+
+    # aggregate metrics for epoch
+    accuracy = correct / total
+    avg_loss = epoch_loss / len(dataloader)
     time_for_epoch = time.time() - start
-    return epoch_loss / len(dataloader), time_for_epoch
+    return avg_loss, accuracy, time_for_epoch
 
 
 def evaluate(
-    model: torch.nn.Module,
-    dataloader: StaticGraphTemporalSignal,
-) -> Tuple[float, float]:
+    model: torch.nn.Module, dataloader: StaticGraphTemporalSignal, criterion: Callable
+) -> Tuple[float, float, float]:
     """Train the model
 
     Args:
         model: the model to train
         dataloader: the training dataloader
+        criterion: the loss criterion
 
     Returns:
         avg_loss: the average loss for the epoch
+        accuracy: the classification accuracy
         time: the time taken for a single epoch
     """
 
     start = time.time()
-    epoch_loss = 0
+    epoch_loss = correct = total = 0
     model.eval()
     with torch.no_grad():
         for batch_id, snapshot in enumerate(dataloader):
@@ -86,32 +99,43 @@ def evaluate(
             edge_attr = snapshot.edge_attr.to(device)
             y = snapshot.y.to(device)
             batch = snapshot.batch.to(device)
-            y_hat = model(x, edge_index, edge_attr, batch)
-            loss = torch.mean((y_hat - y) ** 2)
-            epoch_loss += loss.item()
+
+            # find predictions
+            pred = model(x, edge_index, edge_attr, batch)
+            loss = criterion(pred, y)
+
+            # get metrics
+            _, pred_classes = pred.max(1)
+            total += y.size(0)
+            correct += float(pred_classes.eq(y).sum().item())
+            epoch_loss += float(loss.item())
+
+    # aggregate metrics for epoch
+    accuracy = correct / total
+    avg_loss = epoch_loss / len(dataloader)
     time_for_epoch = time.time() - start
-    return epoch_loss / len(dataloader), time_for_epoch
+    return avg_loss, accuracy, time_for_epoch
 
 
 def inference(
-    model: torch.nn.Module,
-    dataloader: StaticGraphTemporalSignal,
-) -> Tuple[float, float, List[float], List[float]]:
+    model: torch.nn.Module, dataloader: StaticGraphTemporalSignal, criterion: Callable
+) -> Tuple[float, float, float, List[int], List[int]]:
     """Train the model
 
     Args:
         model: the model to train
         dataloader: the training dataloader
+        criterion: the loss criterion
 
     Returns:
         avg_loss: the average loss for the epoch
         time: the time taken for inference
-        predictions: the predicted glucose values. These are normalized
-        gts: the ground truth values. These are normalized.
+        predictions: the predicted glucose classes
+        gts: the ground truth glucose classes
     """
 
     start = time.time()
-    epoch_loss = 0
+    epoch_loss = correct = total = 0
     model.eval()
     gts = []
     predictions = []
@@ -122,18 +146,25 @@ def inference(
             edge_attr = snapshot.edge_attr.to(device)
             y = snapshot.y.to(device)
             batch = snapshot.batch.to(device)
-            y_hat = model(x, edge_index, edge_attr, batch)
-            loss = torch.mean((y_hat - y) ** 2)
-            epoch_loss += loss.item()
+
+            # find predictions
+            pred = model(x, edge_index, edge_attr, batch)
+            loss = criterion(pred, y)
+
+            # get metrics
+            _, pred_classes = pred.max(1)
+            total += y.size(0)
+            correct += float(pred_classes.eq(y).sum().item())
+            epoch_loss += float(loss.item())
+
             gts.extend(y.tolist())
-            predictions.extend(y_hat.tolist())
-    time_taken = time.time() - start
-    return (
-        epoch_loss / len(dataloader),
-        time_taken,
-        np.array(predictions).reshape(-1, 1),
-        np.array(gts).reshape(-1, 1),
-    )
+            predictions.extend(pred.tolist())
+
+    # aggregate metrics for epoch
+    accuracy = correct / total
+    avg_loss = epoch_loss / len(dataloader)
+    time_for_epoch = time.time() - start
+    return avg_loss, accuracy, time_for_epoch, predictions, gts
 
 
 def train_gnn(
@@ -164,14 +195,15 @@ def train_gnn(
     torch.manual_seed(GLOBAL_SEED)
 
     # Hyperparams
-    batch_size = 4
+    batch_size = 128
     lr = 1e-2
     num_epochs = 100
 
     # Params
-    enc_seq_len = 6  # length of input given to encoder
+    enc_seq_len = 7  # length of input given to encoder
     output_sequence_length = 1  # how many future glucose values to predict
     step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
+    num_classes = 5  # number of discrete bins glucose values are divided into
 
     # Define input variables
     input_variables = INPUT_COVARIATES + TARGET_COL
@@ -189,7 +221,7 @@ def train_gnn(
 
     # create dataset
 
-    dataloader_train, dataloader_valid, dataloader_test, scaler_y = get_dataloaders(
+    dataloader_train, dataloader_valid, dataloader_test, _ = get_dataloaders(
         df_train=df_train,
         df_valid=df_valid,
         df_test=df_test,
@@ -202,15 +234,16 @@ def train_gnn(
         batch_size=batch_size,
         logger=logger,
         verbose=verbose,
+        normalize_target=False,
     )
 
     # create model
 
-    model = RecurrentGCN(node_features=enc_seq_len, batch_size=batch_size)
+    model = RecurrentGCN_classification(node_features=enc_seq_len, num_classes=num_classes)
 
     # Criterion optimizer early stopping lr_scheduler
 
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     early_stopping = EarlyStopping(patience=20, verbose=verbose)
     lr_scheduler = LRScheduler(optimizer, verbose=verbose)
@@ -227,7 +260,8 @@ def train_gnn(
 
     # setup paths
 
-    fpath_curve_plot = dirpath_out.joinpath("loss_curve.jpg")
+    fpath_loss_curve_plot = dirpath_out.joinpath("loss_curve.jpg")
+    fpath_acc_curve_plot = dirpath_out.joinpath("acc_curve.jpg")
     fpath_inference_df = dirpath_out.joinpath("inference.csv")
     dirpath_checkpoint = dirpath_out.joinpath("model_checkpoint")
     dirpath_checkpoint.mkdir()
@@ -241,30 +275,38 @@ def train_gnn(
     model.to(device)
 
     train_history_loss = []
+    train_history_acc = []
+
     val_history_loss = []
-    best_valid_rmse = float("inf")
+    val_history_acc = []
+
+    best_valid_acc = 0
     for epoch in range(num_epochs):
-        loss_train, time_train = train(
-            model=model, dataloader=dataloader_train, optimizer=optimizer
+        loss_train, acc_train, time_train = train(
+            model=model, dataloader=dataloader_train, optimizer=optimizer, criterion=criterion
         )
-        loss_valid, _ = evaluate(model=model, dataloader=dataloader_valid)
+        loss_valid, acc_valid, _ = evaluate(
+            model=model, dataloader=dataloader_valid, criterion=criterion
+        )
         if verbose:
             print(
-                f"Epoch {epoch}: Train Loss= {loss_train:.3f} \t Valid Loss= {loss_valid:.3f}, \t"
+                f"Epoch {epoch}: Train Loss= {loss_train:.3f}, Train Acc= {acc_train:.3f} \t"
+                f"Valid Loss= {loss_valid:.3f}, Valid Acc={acc_valid:.3f} \t"
                 f" Training Time ={time_train:.2f} s"
             )
         logger.info(
-            f"Epoch {epoch}: Train Loss= {loss_train:.3f} \t Valid Loss= {loss_valid:.3f}, \t"
+            f"Epoch {epoch}: Train Loss= {loss_train:.3f}, Train Acc= {acc_train:.3f} \t"
+            f"Valid Loss= {loss_valid:.3f}, Valid Acc={acc_valid:.3f} \t"
             f" Training Time ={time_train:.2f} s"
         )
-        if loss_valid < best_valid_rmse:
-            best_valid_rmse = loss_valid
+        if acc_valid > best_valid_acc:
+            best_valid_acc = acc_valid
             checkpoint = {
                 "epoch": epoch,
                 "model": model.state_dict(),
                 "criterion": criterion.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "best_rmse": best_valid_rmse,
+                "best_accuracy": best_valid_acc,
             }
             fpath_checkpoint = dirpath_checkpoint.joinpath("best_checkpoint.pth")
             torch.save(checkpoint, fpath_checkpoint)
@@ -277,7 +319,10 @@ def train_gnn(
         early_stopping(loss_valid)
 
         train_history_loss.append(loss_train)
+        train_history_acc.append(acc_train)
+
         val_history_loss.append(loss_valid)
+        val_history_acc.append(acc_valid)
 
         if early_stopping.early_stop:
             break
@@ -288,15 +333,26 @@ def train_gnn(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # save curves
-    plt.plot(range(len(train_history_loss)), train_history_loss, label="Train MSE")
-    plt.plot(range(len(val_history_loss)), val_history_loss, label="Val MSE")
+    # save loss curves
+    plt.plot(range(len(train_history_loss)), train_history_loss, label="Train CE Loss")
+    plt.plot(range(len(val_history_loss)), val_history_loss, label="Val CE Loss")
     # plt.ylim(top=5000)
     plt.xlabel("Epoch")
-    plt.ylabel("MSE Loss")
+    plt.ylabel("CE Loss")
     plt.legend()
     plt.title("Loss Curves")
-    plt.savefig(fpath_curve_plot, bbox_inches="tight", dpi=150)
+    plt.savefig(fpath_loss_curve_plot, bbox_inches="tight", dpi=150)
+    plt.close()
+
+    # save loss curves
+    plt.plot(range(len(train_history_acc)), train_history_acc, label="Train Accuracy")
+    plt.plot(range(len(val_history_acc)), val_history_acc, label="Val Accuracy")
+    # plt.ylim(top=5000)
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.title("Accuracy Curves")
+    plt.savefig(fpath_acc_curve_plot, bbox_inches="tight", dpi=150)
     plt.close()
 
     logger.info("******* Finished Training *******")
@@ -305,37 +361,45 @@ def train_gnn(
 
     # inference on test set
     checkpoint = torch.load(fpath_checkpoint)
-    model = RecurrentGCN(node_features=enc_seq_len, batch_size=batch_size)
+    model = RecurrentGCN_classification(node_features=enc_seq_len, num_classes=num_classes)
     model.to(device)
     model.load_state_dict(checkpoint["model"])
     del checkpoint
 
-    loss_test, _, predicted_values, gts = inference(model=model, dataloader=dataloader_test)
-    inv_scaled_gt = scaler_y.inverse_transform(gts)
-    inv_scaled_predictions = scaler_y.inverse_transform(predicted_values)
-    inference_result = pd.DataFrame(
-        zip(
-            gts.squeeze(),
-            predicted_values.squeeze(),
-            inv_scaled_gt.squeeze(),
-            inv_scaled_predictions.squeeze(),
-        ),
-        columns=["gt_scaled", "predicted_scaled", "gt_inv_scaled", "predicted_inv_scaled"],
+    loss_test, acc_test, _, predicted_values, gts = inference(
+        model=model, dataloader=dataloader_test, criterion=criterion
     )
+
+    # inv_scaled_gt = scaler_y.inverse_transform(gts)
+    # inv_scaled_predictions = scaler_y.inverse_transform(predicted_values)
+    # inference_result = pd.DataFrame(
+    #     zip(
+    #         gts.squeeze(),
+    #         predicted_values.squeeze(),
+    #         inv_scaled_gt.squeeze(),
+    #         inv_scaled_predictions.squeeze(),
+    #     ),
+    #     columns=["gt_scaled", "predicted_scaled", "gt_inv_scaled", "predicted_inv_scaled"],
+    # )
+
+    inference_result = pd.DataFrame(zip(gts, predicted_values), columns=["gt", "predicted"])
     inference_result.to_csv(fpath_inference_df)
 
     time_taken = time.time() - start
 
-    logger.info(f"Final test MSE loss: {loss_test}")
-    if verbose:
-        print(f"Final test MSE loss: {loss_test}")
-        print(f"Total time taken: {time_taken} s")
+    logger.info(f"Final test CE loss: {loss_test}")
+    logger.info(f"Final test accuracy: {acc_test}")
     logger.info(f"Total time taken: {time_taken} s")
+
+    if verbose:
+        print(f"Final test CE loss: {loss_test}")
+        print(f"Final test accuracy: {acc_test}")
+        print(f"Total time taken: {time_taken} s")
 
     del model
     torch.cuda.empty_cache()
     gc.collect()
-    return loss_test
+    return loss_test, acc_test
 
 
 def parse_args():

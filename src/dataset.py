@@ -425,11 +425,11 @@ def df_to_patient_tensors(
         if scaler_x is not None:
             features = scaler_x.transform(features)
 
-        target = df_patient[target_col].to_numpy()
+        target = df_patient[target_col].to_numpy(dtype=int)
         if scaler_y is not None:
             target = scaler_y.transform(target)
 
         patient_features_list.append(torch.tensor(features, dtype=torch.float32))
-        patient_target_list.append(torch.tensor(target, dtype=torch.float32))
+        patient_target_list.append(torch.tensor(target, dtype=torch.int))
 
     return patient_features_list, patient_target_list
