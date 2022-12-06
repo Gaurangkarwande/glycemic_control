@@ -3,7 +3,6 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import torch
 from torch_geometric.loader import DataLoader
 
 from src.dataset import (
@@ -63,7 +62,8 @@ def get_dataloaders(
         scaler_y = get_normalizing_scaler(df_train[target_variable].values)
     else:
         logger.info("Not Normalizing glucose values")
-        print("Not Normalizing glucose values")
+        if verbose:
+            print("Not Normalizing glucose values")
 
     X_train, y_train = df_to_patient_tensors(
         df_train,

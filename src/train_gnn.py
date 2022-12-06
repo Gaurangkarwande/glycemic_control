@@ -175,7 +175,7 @@ def train_gnn(
     dirpath_out: Path,
     logger: logging.Logger,
     verbose: bool = True,
-) -> float:
+) -> Tuple[float, float]:
     """Train the transformer model
 
     Args:
@@ -186,7 +186,9 @@ def train_gnn(
         dirpath_out: path to where training runs will be recorded
         verbose: whether to print details
 
-    Returns: the inference loss
+    Returns:
+        loss_test : the test set loss
+        acc_test : the test set classification accuracy
         # TODO: df_results: the dataframe housing the results
     """
 
@@ -195,7 +197,7 @@ def train_gnn(
     torch.manual_seed(GLOBAL_SEED)
 
     # Hyperparams
-    batch_size = 128
+    batch_size = 512
     lr = 1e-2
     num_epochs = 100
 

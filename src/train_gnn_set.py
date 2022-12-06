@@ -4,7 +4,7 @@ from pathlib import Path
 from src.train_gnn import train_gnn
 
 import pandas as pd
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 import torch.multiprocessing as mp
@@ -36,7 +36,7 @@ def run_experiment(
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
     dirpath_results: Path,
-) -> float:
+) -> Tuple[float, float]:
     """Runs the experiment for a single dag
 
      Args:
@@ -47,7 +47,9 @@ def run_experiment(
         df_test: training data
         dirpath_results: path to where results will be recorded
 
-    Returns: the inference loss
+    Returns:
+        loss_test : the test set loss
+        acc_test : the test set classification accuracy
         # TODO: df_results: the dataframe housing the results
     """
 
@@ -72,7 +74,7 @@ def run_experiment(
     print(f"Started training for DAG: {dag_type}_{dag_name}")
 
     try:
-        test_loss = train_gnn(
+        test_loss, test_acc = train_gnn(
             df_train=df_train,
             df_valid=df_valid,
             df_test=df_test,
@@ -84,7 +86,8 @@ def run_experiment(
     except Exception as e:
         print(f"ERROR for DAG: {dag_type}_{dag_name} --> {e}")
         test_loss = None
-    return test_loss
+        test_acc = None
+    return test_loss, test_acc
 
 
 def run_dag_set(
@@ -112,8 +115,9 @@ def run_dag_set(
     assert len(fpaths_dags) == len(dag_types)
 
     dag_losses = []
+    dag_accs = []
     with mp.Pool(processes=8) as pool:
-        for test_loss in pool.starmap(
+        for test_loss, test_acc in pool.starmap(
             run_experiment,
             zip(
                 fpaths_dags,
@@ -125,6 +129,7 @@ def run_dag_set(
             ),
         ):
             dag_losses.append(test_loss)
+            dag_accs.append(test_acc)
 
     # for fpath_dag, dag_type in zip(fpaths_dags, dag_types):
     #     test_loss = run_experiment(
@@ -138,12 +143,12 @@ def run_dag_set(
     #     dag_losses.append(test_loss)
 
     dag_inference_dict = {}
-    for fpath_dag, dag_type, dag_loss in zip(fpaths_dags, dag_types, dag_losses):
+    for fpath_dag, dag_type, dag_loss, dag_acc in zip(fpaths_dags, dag_types, dag_losses, dag_accs):
         if fpath_dag is not None:
             dag_name = f"{dag_type}_{fpath_dag.stem}"
         else:
             dag_name = f"{dag_type}_complete"
-        dag_inference_dict[dag_name] = dag_loss
+        dag_inference_dict[dag_name] = {"loss": dag_loss, "accuracy": dag_acc}
 
     return dag_inference_dict
 
