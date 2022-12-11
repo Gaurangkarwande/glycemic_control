@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Tuple
 
+import numpy as np
 import pandas as pd
 import torch
 from torch import Tensor
@@ -17,6 +18,50 @@ def get_timestamp() -> str:
     )
 
     return processed_timestamp
+
+
+def find_num_edges(adj_matrix: np.ndarray) -> int:
+    """Find the number of edges from adjacency matrix
+
+    Args:
+        adj_matrix: the adjacency matrix as a numpy array
+
+    Returns: the number of edges
+    """
+
+    num_edges = np.where(adj_matrix > 0, 1, 0).sum()
+    return num_edges
+
+
+def aggregate_partial_dags(partial_dags: List[np.ndarray], majority_threshold: int) -> np.ndarray:
+    """Aggregate the partial dags by majority voting.
+    Algorithm:
+        1. Select an edge, say edge from node i to j. Direction is important.
+        2. Find number of partial dags having this particular edge
+        3. If the number is greater than the threshold then the aggregated dag has this edge.
+        Assign the edge weight in aggregated dag to the maximum edge weight for this edge in all
+        partial dags.
+
+    Args:
+        partial_dags: the list of 2d partial dags to aggregate
+        majority_threshold: the threshold value used in step 3
+
+    Returns: the aggregated dag
+    """
+
+    assert len(partial_dags) > 0, "The list of partial dags is empty"
+    partial_dag_set = np.stack(partial_dags, axis=2)
+    dag_shape = partial_dags[0].shape
+
+    aggregated_dag = np.zeros(shape=dag_shape)
+
+    for row in range(dag_shape[0]):
+        for col in range(dag_shape[1]):
+            sequence = partial_dag_set[row, col]
+            num_votes = np.where(sequence > 0, 1, 0).sum()
+            aggregated_dag[row, col] = sequence.max() if num_votes > majority_threshold else 0
+
+    return aggregated_dag
 
 
 def find_hyper_glycemia_hours(df: pd.DataFrame) -> List[Tuple[int, int]]:

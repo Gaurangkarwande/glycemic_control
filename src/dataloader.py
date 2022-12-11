@@ -158,7 +158,9 @@ def get_dataloaders(
     # edge_index = adj_matrix.nonzero().t().contiguous()
     # edge_weights = torch.ones(edge_index.shape[1])
 
-    logger.info(f"ADJACENCY MATRIX - Number of edges is {len(edge_weights)//2}")
+    logger.info(
+        f"ADJACENCY MATRIX - Number of edges is {len(edge_weights)}"
+    )  # bidirectional edge counted as two distinct edge
 
     dataloader_train_temp = StaticGraphTemporalSignal(
         edge_index=edge_index, edge_weight=edge_weights, features=X_train, targets=y_train
