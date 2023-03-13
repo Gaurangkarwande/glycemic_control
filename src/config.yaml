@@ -1,0 +1,21 @@
+---
+
+# model hyperparameters
+lstm_input_dim: 1
+lstm_hidden_dim: 64
+lstm_num_layers: 1
+gnn_hidden_dim: 128
+gnn_out_dim: 256
+fc_hidden_dim: 256
+dropout: 0.7
+gat_heads: 4
+num_classes: 2
+
+# training parameters
+batch_size_train: 64
+batch_size_val: 64
+batch_size_test: 64
+num_epochs: 50
+patience: 10
+min_delta: 0.00001
+lr: 0.001

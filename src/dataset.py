@@ -3,341 +3,107 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from random import sample, shuffle
 from sklearn.preprocessing import RobustScaler
 from torch.utils.data import Dataset
-
+from torch_geometric.data import Data
+from torch_geometric.utils import dense_to_sparse
+from torch.nn.utils.rnn import pad_sequence
 from src.constants import INPUT_COVARIATES, TARGET_COL
+from src.utils import dag_fully_connected
 
 
 SCALER_TYPE = RobustScaler
 
 
-class TransformerDataset(Dataset):
-    """
-    Dataset class used for transformer models.
-
-    """
+class GraphClassificationDataset(Dataset):
+    """The Dataset class for graph classification"""
 
     def __init__(
         self,
-        data: List[List[torch.tensor]],
-        labels: List[List[torch.tensor]],
-        indices: List[List[Tuple[int, int]]],
-        num_samples: int,
-        enc_seq_len: int,
-        target_seq_len: int,
+        data: torch.Tensor,
+        seq_lens: List[int],
+        target_labels: List[int],
+        init_adj_mat: np.ndarray,
     ) -> None:
-
         """
         Args:
-            data: the entire train, validation or test data sequence
-                        before any slicing. If univariate, data.size() will be
-                        [number of samples, number of variables]
-                        where the number of variables will be equal to 1 + the number of
-                        exogenous variables. Number of exogenous variables would be 0
-                        if univariate.
-            labels : the entire training labels
-            indices: a list of tuples. Each tuple has two elements:
-                     1) the start index of a sub-sequence
-                     2) the end index of a sub-sequence.
-                     The sub-sequence is split into src, trg and trg_y later.
-            num_samples: total number of input output pairs
-            enc_seq_len: the desired length of the input sequence given to the
-                     the first layer of the transformer model.
-            target_seq_len: the desired length of the target sequence (the output of the model)
-            target_idx: The index position of the target variable in data. Data
-                        is a 2D tensor
+            data: the padded time series data
+            seq_lens: the original unpadded sequence lengths
+            target: the class labels
         """
-
         super().__init__()
+        selected_sample_ids = balance_dataset(target_labels)
+        self.data = data[selected_sample_ids]
+        self.seq_lens = [seq_lens[i] for i in selected_sample_ids]
+        self.target_labels = [target_labels[i] for i in selected_sample_ids]
+        self.init_adj_mat = init_adj_mat
+        self.init_edge_index, self.init_edge_weight = dense_to_sparse(torch.as_tensor(init_adj_mat))
 
-        self.indices = self.stack_indices(labels, indices)
-        assert len(self.indices) == num_samples
-
-        self.data = torch.vstack(data)
-
-        self.labels = torch.vstack(labels)
-
-        self.enc_seq_len = enc_seq_len
-
-        self.target_seq_len = target_seq_len
-
-    def __len__(self):
-
-        return len(self.indices)
+    def __len__(self) -> int:
+        return len(self.target_labels)
 
     def __getitem__(self, index):
-        """
-        Returns a tuple with 3 elements:
-        1) src (the encoder input)
-        2) trg (the decoder input)
-        3) trg_y (the target)
-        """
-
-        # Get the first element of the i'th tuple in the list self.indicesasdfas
-        start_idx = self.indices[index][0]
-
-        # Get the second (and last) element of the i'th tuple in the list self.indices
-        end_idx = self.indices[index][1]
-
-        sequence = self.data[start_idx:end_idx]
-        labels = self.labels[start_idx:end_idx]
-
-        # print("From __getitem__: sequence length = {}".format(len(sequence)))
-
-        src, trg, trg_y = self.get_src_trg(
-            data_sequence=sequence,
-            label_sequence=labels,
-            enc_seq_len=self.enc_seq_len,
-            target_seq_len=self.target_seq_len,
+        return Data(
+            x=self.data[index].T,
+            y=torch.tensor(self.target_labels[index]),
+            seq_lens=self.seq_lens[index],
+            edge_index=self.init_edge_index,
+            edge_attr=self.init_edge_weight.unsqueeze(dim=1),
         )
 
-        return src, trg, trg_y
 
-    def get_src_trg(
-        self,
-        data_sequence: torch.Tensor,
-        label_sequence: torch.Tensor,
-        enc_seq_len: int,
-        target_seq_len: int,
-    ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
-
-        """
-        Generate the src (encoder input), trg (decoder input) and trg_y (the target)
-        sequences from a sequence.
-        Args:
-            data_sequence: a tensor of shape (n, NUM_COVARIATES) where
-                    n = encoder input length + target sequence length
-            label_sequence: a tensor of shpae (n, 1) where
-                    n = encoder input length + target sequence length
-            enc_seq_len: the desired length of the input to the transformer encoder
-            target_seq_len: the desired length of the target sequence (the
-                            one against which the model output is compared)
-        Return:
-            src: used as input to the transformer encoder (enc_seq_len, NUM_COVARIATES)
-            trg: used as input to the transformer decoder (target_seq_len, 1)
-            trg_y: the target sequence against which the model output
-                is compared when computing loss. (target_seq_len, 1)
-
-        """
-        assert (
-            len(data_sequence) == enc_seq_len + target_seq_len
-        ), "Sequence length does not equal (input length + target length)"
-
-        # encoder input
-        src = data_sequence[:enc_seq_len]
-
-        # decoder input. As per the paper, it must have the same dimension as the
-        # target sequence, and it must contain the last value of src, and all
-        # values of trg_y except the last (i.e. it must be shifted right by 1)
-        trg = data_sequence[enc_seq_len - 1 : len(label_sequence) - 1]
-
-        assert len(trg) == target_seq_len, "Length of trg does not match target sequence length"
-
-        # The target sequence against which the model output will be compared to compute loss
-        trg_y = label_sequence[-target_seq_len:]
-
-        assert len(trg_y) == target_seq_len, "Length of trg_y does not match target sequence length"
-
-        return (
-            src,
-            trg,
-            trg_y.squeeze(-1),
-        )
-
-    def stack_indices(
-        self, labels: List[List[torch.Tensor]], indices: List[List[Tuple[int, int]]]
-    ) -> List[Tuple[int, int]]:
-        """
-        Stacks the patient specific indices list into one cohesive list that can iterated upon
-        in the dataloader
-
-        Args:
-            labels : the output labels for each input observation
-            indices : the list of patient specific indices
-
-        Returns: stacked indices with mapping to patient specific indices
-        """
-
-        stacked_indices = []
-        prev_cum_len = 0
-        for labels, patient_indices in zip(labels, indices):
-            for endpoints in patient_indices:
-                start, end = endpoints
-                stacked_indices.append((prev_cum_len + start, prev_cum_len + end))
-            prev_cum_len += len(labels)
-        return stacked_indices
-
-
-class GraphDataset(Dataset):
-    """
-    Dataset class used for transformer models.
-
-    """
+class LSTMClassificationDataset(Dataset):
+    """The Dataset class for graph classification"""
 
     def __init__(
         self,
-        data: List[List[torch.tensor]],
-        labels: List[List[torch.tensor]],
-        indices: List[List[Tuple[int, int]]],
-        num_samples: int,
-        enc_seq_len: int,
-        target_seq_len: int,
+        data: torch.Tensor,
+        seq_lens: List[int],
+        target_labels: List[int],
+        init_adj_mat: np.ndarray,
     ) -> None:
-
         """
         Args:
-            data: the entire train, validation or test data sequence
-                        before any slicing. If univariate, data.size() will be
-                        [number of samples, number of variables]
-                        where the number of variables will be equal to 1 + the number of
-                        exogenous variables. Number of exogenous variables would be 0
-                        if univariate.
-            labels : the entire training labels
-            indices: a list of tuples. Each tuple has two elements:
-                     1) the start index of a sub-sequence
-                     2) the end index of a sub-sequence.
-                     The sub-sequence is split into src, trg and trg_y later.
-            num_samples: total number of input output pairs
-            enc_seq_len: the desired length of the input sequence given to the
-                     the first layer of the transformer model.
-            target_seq_len: the desired length of the target sequence (the output of the model)
-            target_idx: The index position of the target variable in data. Data
-                        is a 2D tensor
+            data: the padded time series data
+            seq_lens: the original unpadded sequence lengths
+            target: the class labels
         """
-
         super().__init__()
+        selected_sample_ids = balance_dataset(target_labels)
+        self.data = data[selected_sample_ids]
+        self.seq_lens = [seq_lens[i] for i in selected_sample_ids]
+        self.target_labels = [target_labels[i] for i in selected_sample_ids]
+        self.init_adj_mat = init_adj_mat
+        self.init_edge_index, self.init_edge_weight = dense_to_sparse(torch.as_tensor(init_adj_mat))
 
-        self.indices = self.stack_indices(labels, indices)
-        assert len(self.indices) == num_samples
-
-        self.data = torch.vstack(data)
-
-        self.labels = torch.vstack(labels)
-
-        self.enc_seq_len = enc_seq_len
-
-        self.target_seq_len = target_seq_len
-
-    def __len__(self):
-
-        return len(self.indices)
+    def __len__(self) -> int:
+        return len(self.target_labels)
 
     def __getitem__(self, index):
-        """
-        Returns a tuple with 3 elements:
-        1) src (the encoder input)
-        2) trg (the decoder input)
-        3) trg_y (the target)
-        """
-
-        # Get the first element of the i'th tuple in the list self.indicesasdfas
-        start_idx = self.indices[index][0]
-
-        # Get the second (and last) element of the i'th tuple in the list self.indices
-        end_idx = self.indices[index][1]
-
-        sequence = self.data[start_idx:end_idx]
-        labels = self.labels[start_idx:end_idx]
-
-        # print("From __getitem__: sequence length = {}".format(len(sequence)))
-
-        src, trg_y = self.get_src_trg(
-            data_sequence=sequence,
-            label_sequence=labels,
-            enc_seq_len=self.enc_seq_len,
-            target_seq_len=self.target_seq_len,
-        )
-
-        return src, trg_y
-
-    def get_src_trg(
-        self,
-        data_sequence: torch.Tensor,
-        label_sequence: torch.Tensor,
-        enc_seq_len: int,
-        target_seq_len: int,
-    ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
-
-        """
-        Generate the src (encoder input), trg (decoder input) and trg_y (the target)
-        sequences from a sequence.
-        Args:
-            data_sequence: a tensor of shape (n, NUM_COVARIATES) where
-                    n = encoder input length + target sequence length
-            label_sequence: a tensor of shpae (n, 1) where
-                    n = encoder input length + target sequence length
-            enc_seq_len: the desired length of the input to the transformer encoder
-            target_seq_len: the desired length of the target sequence (the
-                            one against which the model output is compared)
-        Return:
-            src: used as input to the transformer encoder (enc_seq_len, NUM_COVARIATES)
-            trg: used as input to the transformer decoder (target_seq_len, 1)
-            trg_y: the target sequence against which the model output
-                is compared when computing loss. (target_seq_len, 1)
-
-        """
-        assert (
-            len(data_sequence) == enc_seq_len + target_seq_len
-        ), "Sequence length does not equal (input length + target length)"
-
-        # encoder input
-        src = data_sequence[:enc_seq_len]
-
-        # decoder input. As per the paper, it must have the same dimension as the
-        # target sequence, and it must contain the last value of src, and all
-
-        # The target sequence against which the model output will be compared to compute loss
-        trg_y = label_sequence[-target_seq_len:]
-
-        assert len(trg_y) == target_seq_len, "Length of trg_y does not match target sequence length"
-
-        return (
-            src,
-            trg_y.squeeze(-1),
-        )
-
-    def stack_indices(
-        self, labels: List[List[torch.Tensor]], indices: List[List[Tuple[int, int]]]
-    ) -> List[Tuple[int, int]]:
-        """
-        Stacks the patient specific indices list into one cohesive list that can iterated upon
-        in the dataloader
-
-        Args:
-            labels : the output labels for each input observation
-            indices : the list of patient specific indices
-
-        Returns: stacked indices with mapping to patient specific indices
-        """
-
-        stacked_indices = []
-        prev_cum_len = 0
-        for labels, patient_indices in zip(labels, indices):
-            for endpoints in patient_indices:
-                start, end = endpoints
-                stacked_indices.append((prev_cum_len + start, prev_cum_len + end))
-            prev_cum_len += len(labels)
-        return stacked_indices
+        return self.data[index].T, torch.tensor(self.target_labels[index]), self.seq_lens[index]
 
 
-def stack_dataset_featues_target(
-    dataset: GraphDataset,
-) -> Tuple[List[torch.tensor], List[torch.tensor]]:
-    """Stack the features and targets from the created dataset
+def balance_dataset(target_labels: List[int]) -> List[int]:
+    """Balance the classes
 
     Args:
-        dataset: an iterable temporal dataset
+        target_labels: list of target labels
 
-    Returns: the stacked features and targets
+    Returns: indices of balanced dataset
     """
+    negative_ids = []
+    positive_ids = []
 
-    features = []
-    targets = []
-    for snapshot in dataset:
-        features.append(snapshot[0].T.numpy())
-        targets.append(snapshot[1].numpy())
-    return features, targets
+    for id, label in enumerate(target_labels):
+        if label == 0:
+            negative_ids.append(id)
+        else:
+            positive_ids.append(id)
+    num_samples = min(len(positive_ids), len(negative_ids))
+    balanced_ids = sample(positive_ids, num_samples) + sample(negative_ids, num_samples)
+    shuffle(balanced_ids)
+    return balanced_ids
 
 
 def get_adjacency_matrix(df_dag: Optional[pd.DataFrame]) -> np.ndarray:
@@ -402,34 +168,97 @@ def df_to_patient_tensors(
     df: pd.DataFrame,
     feature_cols: List[str],
     target_col: str,
-    scaler_x: SCALER_TYPE,
-    scaler_y: SCALER_TYPE,
-) -> Tuple[List[torch.tensor], List[torch.tensor]]:
+    scaler: SCALER_TYPE = None,
+) -> Tuple[List[torch.tensor], List[int], List[int]]:
     """Convert the dataframe to tensor data
 
-    Args :
+    Args:
         df : the data in dataframe form
         feature_cols : the list of covariates we want to use as features in the multivariate
             timeseries
         target_col : the name of the column having glucose values
         scaler : the preprocessing scaler used to normalize the data
 
-    Returns : each patient timeseries as (feature_tensor, target_tensor)
+    Returns:
+        patient_tensor: the patient time series as tensor
+        patient_seq_lens: the lenght of each patient time series
+        target_labels: the patient class
     """
 
-    patient_features_list = []
-    patient_target_list = []
+    patient_features = []
+    target_labels = []
+    patient_seq_lens = []
     df_patient_group = df.groupby(by="subject_id")
     for _, df_patient in df_patient_group:
         features = df_patient[feature_cols].to_numpy()
-        if scaler_x is not None:
-            features = scaler_x.transform(features)
+        if scaler is not None:
+            features = scaler.transform(features)
 
-        target = df_patient[target_col].to_numpy(dtype=int)
-        if scaler_y is not None:
-            target = scaler_y.transform(target)
+        patient_features.append(torch.as_tensor(features, dtype=torch.float32))
+        patient_seq_lens.append(features.shape[0])
+        target_labels.append(df_patient[target_col].unique()[0])
 
-        patient_features_list.append(torch.tensor(features, dtype=torch.float32))
-        patient_target_list.append(torch.tensor(target, dtype=torch.int))
+    return patient_features, patient_seq_lens, target_labels
 
-    return patient_features_list, patient_target_list
+
+def build_classification_datasets(
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
+    feature_cols: List[str],
+    target_col: List[str],
+) -> Tuple[GraphClassificationDataset, GraphClassificationDataset, GraphClassificationDataset]:
+    """Build the graph classification dataste from given dataframe
+
+    Args:
+        df_train: the training dataframe
+        df_test: the validation dataframe
+        df_val: the testing dataframe
+        feature_cols: list of input variable names
+        target_col: the target variable
+
+    Returns: the build dataset
+    """
+
+    scaler = get_normalizing_scaler(df_train[feature_cols].values)
+
+    patient_tensors_train, patient_seq_lens_train, target_labels_train = df_to_patient_tensors(
+        df_train, feature_cols=feature_cols, target_col=target_col, scaler=scaler
+    )
+    patient_tensors_train = pad_sequence(patient_tensors_train, batch_first=True)
+    init_adj_mat = dag_fully_connected(num_nodes=len(feature_cols), add_self_loops=False)
+
+    dataset_train = GraphClassificationDataset(
+        data=patient_tensors_train,
+        seq_lens=patient_seq_lens_train,
+        target_labels=target_labels_train,
+        init_adj_mat=init_adj_mat,
+    )
+
+    patient_tensors_val, patient_seq_lens_val, target_labels_val = df_to_patient_tensors(
+        df_val, feature_cols=feature_cols, target_col=target_col, scaler=scaler
+    )
+    patient_tensors_val = pad_sequence(patient_tensors_val, batch_first=True)
+    init_adj_mat = dag_fully_connected(num_nodes=len(feature_cols), add_self_loops=False)
+
+    dataset_val = GraphClassificationDataset(
+        data=patient_tensors_val,
+        seq_lens=patient_seq_lens_val,
+        target_labels=target_labels_val,
+        init_adj_mat=init_adj_mat,
+    )
+
+    patient_tensors_test, patient_seq_lens_test, target_labels_test = df_to_patient_tensors(
+        df_test, feature_cols=feature_cols, target_col=target_col, scaler=scaler
+    )
+    patient_tensors_test = pad_sequence(patient_tensors_test, batch_first=True)
+    init_adj_mat = dag_fully_connected(num_nodes=len(feature_cols), add_self_loops=False)
+
+    dataset_test = GraphClassificationDataset(
+        data=patient_tensors_test,
+        seq_lens=patient_seq_lens_test,
+        target_labels=target_labels_test,
+        init_adj_mat=init_adj_mat,
+    )
+
+    return dataset_train, dataset_val, dataset_test

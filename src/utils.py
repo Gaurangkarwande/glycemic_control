@@ -220,6 +220,23 @@ def get_patient_indices(
     return indices, total_samples
 
 
+def dag_fully_connected(num_nodes: int, add_self_loops: int) -> np.ndarray:
+    """Create a fully connected dag
+
+    Args:
+        num_nodes: number of nodes in the graph
+        add_self_loops: whether to add self loops
+
+    Returns: the adjacency matrix
+    """
+    adj_matrix = np.ones((num_nodes, num_nodes))
+    if not add_self_loops:
+        for i in range(adj_matrix.shape[0]):
+            adj_matrix[i, i] = 0
+
+    return adj_matrix
+
+
 class LRScheduler:
     """
     Learning rate scheduler. If the validation loss does not decrease for the

@@ -14,7 +14,7 @@ from torch_geometric.loader import DataLoader
 
 from src.constants import CONTINUOUS_COVARIATES_PROCESSED, STATIC_COLS, TARGET_COL
 from src.dataset import build_classification_datasets
-from src.models.temporal_gnn import GraphClassification
+from src.models.temporal_gnn import LSTMClassification
 from src.utils import EarlyStopping, LRScheduler, get_timestamp
 import yaml
 
@@ -44,22 +44,34 @@ def train(
     """
 
     start = time.time()
-    epoch_loss = correct = total = 0
+    epoch_loss = 0
+    correct = 0
+    total = 0
     model.train()
     for batch_id, batch in enumerate(dataloader):
-        y = batch.y.to(device)
+        x, y, seq_lens = batch
+        x = x.to(device)
+        y = y.to(device)
         optimizer.zero_grad()
 
         # find predictions
-        pred, _, _ = model(batch, device)
+        pred = model(x, seq_lens)
         loss = criterion(pred, y)
+
+        # Add L1 regularization to the loss function
+        l1_reg = torch.tensor(0., requires_grad=True)
+        for name, param in model.named_parameters():
+            if 'weight' in name:
+                l1_reg = l1_reg + torch.norm(param, p=2)
+
+        loss = loss + 0.00001 * l1_reg
 
         # backpropagate
         loss.backward()
         optimizer.step()
 
         # get metrics
-        _, pred_classes = pred.max(1)
+        _, pred_classes = torch.max(pred, 1)
         total += y.size(0)
         correct += float(pred_classes.eq(y).sum().item())
         epoch_loss += float(loss.item())
@@ -92,14 +104,16 @@ def evaluate(
     model.eval()
     with torch.no_grad():
         for batch_id, batch in enumerate(dataloader):
-            y = batch.y.to(device)
+            x, y, seq_lens = batch
+            x = x.to(device)
+            y = y.to(device)
 
             # find predictions
-            pred, _, _ = model(batch, device)
+            pred = model(x, seq_lens)
             loss = criterion(pred, y)
 
             # get metrics
-            _, pred_classes = pred.max(1)
+            _, pred_classes = torch.max(pred, 1)
             total += y.size(0)
             correct += float(pred_classes.eq(y).sum().item())
             epoch_loss += float(loss.item())
@@ -135,14 +149,16 @@ def inference(
     predictions = []
     with torch.no_grad():
         for batch_id, batch in enumerate(dataloader):
-            y = batch.y.to(device)
+            x, y, seq_lens = batch
+            x = x.to(device)
+            y = y.to(device)
 
             # find predictions
-            pred, _, _ = model(batch, device)
+            pred = model(x, seq_lens)
             loss = criterion(pred, y)
 
             # get metrics
-            _, pred_classes = pred.max(1)
+            _, pred_classes = torch.max(pred, 1)
             total += y.size(0)
             correct += float(pred_classes.eq(y).sum().item())
             epoch_loss += float(loss.item())
@@ -244,13 +260,13 @@ def train_gnn(
 
     # create model
 
-    model = GraphClassification(config=config, num_nodes=len(input_variables), pretraining=True)
+    model = LSTMClassification(config=config)
 
     # Criterion optimizer early stopping lr_scheduler
 
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    early_stopping = EarlyStopping(patience=20, verbose=verbose)
+    early_stopping = EarlyStopping(patience=10, verbose=verbose)
     # lr_scheduler = LRScheduler(optimizer, verbose=verbose)
 
     # transfer to GPU
@@ -321,7 +337,7 @@ def train_gnn(
                 f"Checkpoint saved at Epoch : {epoch}, at location : {str(fpath_checkpoint)}"
             )
         # lr_scheduler(loss_valid)
-        early_stopping(loss_valid)
+        # early_stopping(loss_valid)
 
         train_history_loss.append(loss_train)
         train_history_acc.append(acc_train)
@@ -329,10 +345,10 @@ def train_gnn(
         val_history_loss.append(loss_valid)
         val_history_acc.append(acc_valid)
 
-        # if early_stopping.early_stop:
-        #     break
+        if early_stopping.early_stop:
+            break
 
-    logger.info(f"Final scheduler state {lr_scheduler.get_final_lr()}\n")
+    # logger.info(f"Final scheduler state {lr_scheduler.get_final_lr()}\n")
     del model
     del optimizer
     gc.collect()
@@ -366,7 +382,7 @@ def train_gnn(
 
     # inference on test set
     checkpoint = torch.load(fpath_checkpoint)
-    model = GraphClassification(config=config, num_nodes=len(input_variables), pretraining=True)
+    model = LSTMClassification(config=config)
     model.to(device)
     model.load_state_dict(checkpoint["model"])
     del checkpoint

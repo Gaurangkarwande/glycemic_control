@@ -1,5 +1,5 @@
 META_COLS = ["subject_id", "stay_id", "hr"]
-TARGET_COL = ["glucose"]
+TARGET_COL = "diabetes"
 
 CONTINUOUS_COVARIATES = [
     "sofa_24hours",
@@ -79,6 +79,7 @@ CONTINUOUS_COVARIATES_PROCESSED = [
     "tube_feeding",
     "dextrose",
     "insulin",
+    "glucose"
 ]
 
 STATIC_COLS = ["weight_kg", "height_cm", "bmi", "admission_age"]
